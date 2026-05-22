@@ -4,7 +4,7 @@ Updates live prices and recalculates scores with session-aware logic.
 """
 import os, time, datetime
 import pandas as pd
-import pandas_ta as ta  # REQUIRED to register the .ta accessor
+import pandas_ta_classic as ta
 import numpy as np
 import yfinance as yf
 from supabase import create_client

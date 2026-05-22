@@ -1,0 +1,14 @@
+streamlit==1.38.0
+pandas==2.2.2
+numpy==1.26.4
+yfinance==0.2.43
+pandas-ta-classic==0.3.14
+supabase==2.7.0
+plotly==5.24.0
+pytz==2024.1
+vaderSentiment==3.3.2
+feedparser==6.0.11
+scipy==1.14.0
+scikit-learn==1.5.1
+Pillow==10.4.0
+pytesseract==0.3.13

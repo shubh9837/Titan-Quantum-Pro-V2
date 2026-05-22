@@ -1,73 +1,38 @@
 import streamlit as st
 import pandas as pd
-from supabase import create_client
-import datetime
+import pandas_ta as ta  # REQUIRED to register the .ta accessor
 import numpy as np
 import yfinance as yf
 import pytz
 import plotly.graph_objects as go
 import plotly.express as px
-import pandas_ta as ta  # REQUIRED to register the .ta accessor
+from supabase import create_client
 from probability_core import ProbabilityEngine
 from titan_agent import parse_trade_text, parse_order_image, get_response
+
+# Pandas 2.0+ compatibility patch for pandas_ta
+if not hasattr(pd.Series, "append"):
+    pd.Series.append = pd.Series._append
+
+# Streamlit version compatibility
+def safe_rerun():
+    try:
+        st.rerun()
+    except:
+        try:
+            st.experimental_rerun()
+        except:
+            pass
 
 st.set_page_config(page_title="Titan Quantum Pro V2", layout="wide", page_icon="💎")
 
 # ===================== CSS STYLING =====================
 st.markdown("""
 <style>
-    .main { background-color: #0E1117; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #1A1C24;
-        border-radius: 8px 8px 0 0;
-        padding: 10px 20px;
-        font-weight: 600;
-        color: #A0AEC0;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #00B8FF !important;
-        color: white !important;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #1A1C24 0%, #0D1B2A 100%);
-        border-radius: 12px;
-        padding: 16px;
-        border: 1px solid #2D3748;
-        margin-bottom: 10px;
-    }
-    .gem-card {
-        background: linear-gradient(135deg, #1A1C24 0%, #0D1B2A 100%);
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid #00B8FF;
-        margin-bottom: 15px;
-    }
-    .exit-hold { background-color: #064E3B; color: #00FF88; padding: 4px 12px; border-radius: 6px; font-weight: bold; }
-    .exit-tighten { background-color: #78350F; color: #FFC107; padding: 4px 12px; border-radius: 6px; font-weight: bold; }
-    .exit-scale { background-color: #7C2D12; color: #FF9500; padding: 4px 12px; border-radius: 6px; font-weight: bold; }
-    .exit-immediate { background-color: #7F1D1D; color: #FF4B4B; padding: 4px 12px; border-radius: 6px; font-weight: bold; }
-    .knowledge-box {
-        background-color: #1A1C24;
-        border-left: 4px solid #00B8FF;
-        padding: 15px;
-        border-radius: 0 8px 8px 0;
-        margin: 10px 0;
-        font-size: 14px;
-        color: #CBD5E0;
-    }
-    .knowledge-box h4 { color: #00B8FF; margin-top: 0; }
-    .top-pick-row {
-        background: linear-gradient(90deg, #1A1C24 0%, #0D1B2A 100%);
-        border-radius: 10px;
-        padding: 12px 16px;
-        margin-bottom: 8px;
-        border: 1px solid #2D3748;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-    .top-pick-row:hover { border-color: #00B8FF; }
+    .main { background-color: #0E1117; color: white; }
+    .stButton>button { background-color: #00B8FF; color: black; font-weight: bold; border-radius: 8px; }
+    .stMetric { background-color: #1A1C24; border-radius: 10px; padding: 10px; }
+    div[data-testid="stMarkdownContainer"] p { font-size: 14px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -214,11 +179,11 @@ def get_macro_weather():
             idx_str = f"NIFTY: {nifty_val:.0f} ({nifty_pct:+.1f}%) | SENSEX: {sensex_val:.0f} ({sensex_pct:+.1f}%)"
 
             if close > ema20:
-                return "🟢 RISK OFF", f"{idx_str}<br>NIFTY in uptrend. Safe to deploy.", "green"
+                return "🟢 RISK OFF", f"{idx_str}\n\nNIFTY in uptrend. Safe to deploy.", "green"
             elif close > ema50:
-                return "🟡 CAUTION", f"{idx_str}<br>NIFTY below 20 EMA. Cut sizes 50%.", "yellow"
+                return "🟡 CAUTION", f"{idx_str}\n\nNIFTY below 20 EMA. Cut sizes 50%.", "yellow"
             else:
-                return "🔴 RISK ON", f"{idx_str}<br>NIFTY below 50 EMA. CASH IS KING.", "red"
+                return "🔴 RISK ON", f"{idx_str}\n\nNIFTY below 50 EMA. CASH IS KING.", "red"
     except:
         return "🟡 UNKNOWN", "Macro weather unavailable.", "yellow"
 
@@ -228,82 +193,65 @@ def style_pnl(val):
 
 def get_exit_badge(verdict):
     v = str(verdict).upper()
-    if 'EXIT IMMEDIATE' in v: return '<span class="exit-immediate">EXIT IMMEDIATE</span>'
-    if 'SCALE OUT' in v: return '<span class="exit-scale">SCALE OUT 50%</span>'
-    if 'TIGHTEN' in v: return '<span class="exit-tighten">TIGHTEN STOP</span>'
-    return '<span class="exit-hold">HOLD</span>'
+    if 'EXIT IMMEDIATE' in v: return 'EXIT IMMEDIATE'
+    if 'SCALE OUT' in v: return 'SCALE OUT 50%'
+    if 'TIGHTEN' in v: return 'TIGHTEN STOP'
+    return 'HOLD'
 
 # ===================== KNOWLEDGE ARTICLES =====================
 KNOWLEDGE = {
     "score": """
-    <div class="knowledge-box">
-    <h4>📊 What is Confluence Score (0-100)?</h4>
-    The score combines 6 factors: Trend Alignment (25 pts), Momentum Health (20 pts), 
-    Price Structure (20 pts), Volume Signature (15 pts), Relative Strength (10 pts), 
+    #### 📊 What is Confluence Score (0-100)?
+    The score combines 6 factors: Trend Alignment (25 pts), Momentum Health (20 pts),
+    Price Structure (20 pts), Volume Signature (15 pts), Relative Strength (10 pts),
     and Macro Safety (10 pts). Higher = stronger setup.
-    </div>
     """,
     "probability": """
-    <div class="knowledge-box">
-    <h4>🎯 What is Win Probability %?</h4>
-    Bayesian probability calculated from: Base Rate (historical accuracy of similar scores) 
-    x Market Regime Multiplier x Sector Breadth x Relative Strength Filter. 
+    #### 🎯 What is Win Probability %?
+    Bayesian probability calculated from: Base Rate (historical accuracy of similar scores)
+    x Market Regime Multiplier x Sector Breadth x Relative Strength Filter.
     A 75% probability means 3 out of 4 similar setups historically succeeded.
-    </div>
     """,
     "damage": """
-    <div class="knowledge-box">
-    <h4>💀 What is Damage Score (0-100)?</h4>
-    Measures how badly a holding is deteriorating: Structural Break (40 pts max), 
+    #### 💀 What is Damage Score (0-100)?
+    Measures how badly a holding is deteriorating: Structural Break (40 pts max),
     Momentum Reversal (30 pts), Volume Signature (20 pts), Time Decay (10 pts).
-    <br><br>
-    <b>0-30:</b> Normal pullback, HOLD<br>
-    <b>31-55:</b> Risk rising, TIGHTEN STOP<br>
-    <b>56-80:</b> Structure damaged, SCALE OUT 50%<br>
-    <b>81-100:</b> Trend broken, EXIT IMMEDIATE
-    </div>
+    **0-30:** Normal pullback, HOLD
+    **31-55:** Risk rising, TIGHTEN STOP
+    **56-80:** Structure damaged, SCALE OUT 50%
+    **81-100:** Trend broken, EXIT IMMEDIATE
     """,
     "rvol": """
-    <div class="knowledge-box">
-    <h4>📈 What is RVOL (Relative Volume)?</h4>
+    #### 📈 What is RVOL (Relative Volume)?
     Current volume / 20-day average volume. RVOL > 1.5x means unusual activity.
     RVOL > 2.0x often signals institutional accumulation or distribution.
-    </div>
     """,
     "rr": """
-    <div class="knowledge-box">
-    <h4>⚖️ What is Risk:Reward Ratio?</h4>
+    #### ⚖️ What is Risk:Reward Ratio?
     Potential reward / Potential risk. A 1:2 ratio means you risk Rs.1 to make Rs.2.
     We target minimum 1:1.5 for swing trades. Higher is better.
-    </div>
     """,
     "pattern": """
-    <div class="knowledge-box">
-    <h4>🕯️ Chart Patterns Explained</h4>
-    <b>⚡ VCP Squeeze:</b> Volatility contracting with volume drying up. Explosive move imminent.<br>
-    <b>🟢 Bullish Engulfing:</b> Today's candle completely covers yesterday's red candle. Reversal signal.<br>
-    <b>Consolidating:</b> Price moving sideways. Wait for breakout above resistance.<br>
-    <b>Uptrending:</b> Higher highs and higher lows. Buy dips to EMA.
-    </div>
+    #### 🕯️ Chart Patterns Explained
+    **⚡ VCP Squeeze:** Volatility contracting with volume drying up. Explosive move imminent.
+    **🟢 Bullish Engulfing:** Today's candle completely covers yesterday's red candle. Reversal signal.
+    **Consolidating:** Price moving sideways. Wait for breakout above resistance.
+    **Uptrending:** Higher highs and higher lows. Buy dips to EMA.
     """,
     "regime": """
-    <div class="knowledge-box">
-    <h4>🌍 Market Regime Guide</h4>
-    <b>Strong Bull:</b> All EMAs aligned up. Deploy full capital.<br>
-    <b>Bull:</b> Price above 50 EMA. Normal trading.<br>
-    <b>Sideways:</b> No clear trend. Reduce position sizes.<br>
-    <b>Bear:</b> Below 50 EMA. Only short or cash.<br>
-    <b>Volatile Bear:</b> High volatility + downtrend. Avoid new trades.
-    </div>
+    #### 🌍 Market Regime Guide
+    **Strong Bull:** All EMAs aligned up. Deploy full capital.
+    **Bull:** Price above 50 EMA. Normal trading.
+    **Sideways:** No clear trend. Reduce position sizes.
+    **Bear:** Below 50 EMA. Only short or cash.
+    **Volatile Bear:** High volatility + downtrend. Avoid new trades.
     """,
     "session": """
-    <div class="knowledge-box">
-    <h4>⏰ Intraday Session Adjustments</h4>
-    Early morning (9:15-10:00): Volume is building. Scores discounted by 14%.<br>
-    Mid session (11:00-13:00): Volume normalizes. Scores discounted by 5%.<br>
-    Late session (14:00-15:30): Most reliable data. Scores at 98% confidence.<br>
+    #### ⏰ Intraday Session Adjustments
+    Early morning (9:15-10:00): Volume is building. Scores discounted by 14%.
+    Mid session (11:00-13:00): Volume normalizes. Scores discounted by 5%.
+    Late session (14:00-15:30): Most reliable data. Scores at 98% confidence.
     Always verify with EOD scan for final decisions.
-    </div>
     """
 }
 
@@ -329,7 +277,7 @@ with st.sidebar:
 
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
-        st.rerun()
+        safe_rerun()
     st.caption(f"Last Sync: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
     st.markdown("---")
@@ -354,7 +302,7 @@ with st.sidebar:
         elif agent_input:
             response = get_response(agent_input, portfolio_df=port_df, market_df=df)
             st.session_state['agent_response'] = response
-            st.markdown(f"<div style='background:#1A1C24; padding:10px; border-radius:8px; border-left:3px solid #00B8FF;'>{response}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='background:#1A1C24;padding:10px;border-radius:8px;'>{response}</div>", unsafe_allow_html=True)
         else:
             st.info("Type a command or upload an image.")
 
@@ -371,7 +319,7 @@ with st.sidebar:
             }).execute()
             st.success(f"Added {res['symbol']} to portfolio!")
             del st.session_state['agent_result']
-            st.rerun()
+            safe_rerun()
 
     st.markdown("---")
     st.markdown("### 📊 Market Regime")
@@ -390,15 +338,15 @@ with st.sidebar:
     max_dd = st.slider("Max Portfolio DD %", 5, 30, 15)
 
 # ===================== HEADER =====================
-st.markdown("<h1 style='text-align:center; margin-bottom:5px;'>💎 Titan Quantum Pro V2</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; color:#A0AEC0; margin-bottom:20px;'>Institutional-Grade Swing Trading Intelligence</p>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;'><h1 style='color:#00B8FF; margin-bottom:0;'>💎 Titan Quantum Pro V2</h1></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888; margin-bottom:20px;'>Institutional-Grade Swing Trading Intelligence</div>", unsafe_allow_html=True)
 
 status, msg, css_class = get_macro_weather()
 border_color = "#00FF88" if "green" in css_class else "#FF4B4B" if "red" in css_class else "#FFC107"
 st.markdown(f"""
-<div style='padding:15px; border-radius:10px; background:#1A1C24; border-left:5px solid {border_color}; margin-bottom:20px;'>
-<h4 style='margin:0;'>{status}</h4>
-<p style='margin:5px 0 0 0; color:#CBD5E0;'>{msg}</p>
+<div style='border-left: 5px solid {border_color}; padding: 15px; background-color: #1A1C24; border-radius: 8px; margin-bottom: 20px;'>
+    <h4 style='margin:0;'>{status}</h4>
+    <p style='margin:5px 0 0 0; color:#ccc;'>{msg}</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -466,7 +414,7 @@ with tabs[0]:
             st.markdown("---")
 
             # Compact table view
-            display_df = actionable[['SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_%', 'PROBABILITY', 
+            display_df = actionable[['SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_%', 'PROBABILITY',
                                      'SCORE', 'RR_RATIO', 'STOP_LOSS', 'PATTERN', 'EST_PERIOD']].copy()
             display_df['Investment'] = "Rs.10K"
             display_df['Est_Qty'] = (10000 / display_df['PRICE']).astype(int)
@@ -474,7 +422,7 @@ with tabs[0]:
 
             st.dataframe(
                 display_df[['SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_%', 'PROBABILITY', 'SCORE',
-                           'RR_RATIO', 'STOP_LOSS', 'Est_Qty', 'Est_Profit', 'PATTERN', 'EST_PERIOD']]
+                            'RR_RATIO', 'STOP_LOSS', 'Est_Qty', 'Est_Profit', 'PATTERN', 'EST_PERIOD']]
                 .rename(columns={'Est_Qty': 'Qty (Rs.10K)', 'Est_Profit': 'Est Profit (Rs.)'})
                 .style.format({
                     'PRICE': 'Rs.{:.1f}', 'TARGET': 'Rs.{:.1f}', 'UPSIDE_%': '{:.1f}%',
@@ -502,20 +450,18 @@ with tabs[0]:
 
                 with st.container():
                     st.markdown(f"""
-                    <div class="gem-card">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <h3 style="margin:0;">{g['SYMBOL']} <span style="color:#A0AEC0; font-size:16px;">{g['SECTOR']}</span></h3>
-                        <span style="color:{prob_color}; font-size:24px; font-weight:bold;">{g['PROBABILITY']:.1f}%</span>
-                    </div>
-                    <div style="display:flex; gap:30px; margin-top:10px; flex-wrap:wrap;">
-                        <div><b style="color:#00B8FF;">CMP</b><br>Rs.{g['PRICE']:.1f}</div>
-                        <div><b style="color:#00FF88;">Target</b><br>Rs.{g['TARGET']:.1f} (+{g['UPSIDE_%']:.1f}%)</div>
-                        <div><b style="color:#FF4B4B;">Stop Loss</b><br>Rs.{g['STOP_LOSS']:.1f}</div>
-                        <div><b style="color:#FFC107;">R:R</b><br>1:{rr:.1f}</div>
-                        <div><b style="color:#A0AEC0;">Hold</b><br>{g['EST_PERIOD']}</div>
-                        <div><b style="color:#A0AEC0;">Pattern</b><br>{g['PATTERN']}</div>
-                    </div>
-                    <p style="margin-top:10px; color:#CBD5E0; font-size:13px;">{g.get('MC_DESCRIPTION', 'N/A')}</p>
+                    <div style='background:#1A1C24;padding:15px;border-radius:10px;margin-bottom:15px;border-left:4px solid {prob_color};'>
+                        <h3 style='margin:0;'>{g['SYMBOL']} <span style='font-size:14px;color:#888;'>{g['SECTOR']}</span></h3>
+                        <div style='display:flex;gap:20px;margin-top:10px;'>
+                            <div><div style='font-size:12px;color:#888;'>Win Probability</div><div style='font-size:20px;font-weight:bold;color:{prob_color};'>{g['PROBABILITY']:.1f}%</div></div>
+                            <div><div style='font-size:12px;color:#888;'>CMP</div><div style='font-size:18px;'>Rs.{g['PRICE']:.1f}</div></div>
+                            <div><div style='font-size:12px;color:#888;'>Target</div><div style='font-size:18px;'>Rs.{g['TARGET']:.1f} (+{g['UPSIDE_%']:.1f}%)</div></div>
+                            <div><div style='font-size:12px;color:#888;'>Stop Loss</div><div style='font-size:18px;color:#FF4B4B;'>Rs.{g['STOP_LOSS']:.1f}</div></div>
+                            <div><div style='font-size:12px;color:#888;'>R:R</div><div style='font-size:18px;'>1:{rr:.1f}</div></div>
+                            <div><div style='font-size:12px;color:#888;'>Hold</div><div style='font-size:18px;'>{g['EST_PERIOD']}</div></div>
+                        </div>
+                        <div style='margin-top:10px;'><span style='background:#333;padding:4px 8px;border-radius:4px;font-size:12px;'>Pattern: {g['PATTERN']}</span></div>
+                        <div style='margin-top:8px;font-size:12px;color:#888;'>Monte Carlo: {g.get('MC_DESCRIPTION', 'N/A')}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -534,7 +480,7 @@ with tabs[0]:
                                     "entry_target": g['TARGET']
                                 }).execute()
                                 st.success(f"Added {g['SYMBOL']} to portfolio!")
-                                st.rerun()
+                                safe_rerun()
         else:
             st.info("🟡 No high-probability setups right now. Market may be in risk-off mode.")
             st.markdown(KNOWLEDGE["regime"], unsafe_allow_html=True)
@@ -635,16 +581,16 @@ with tabs[1]:
         # Exposure charts
         col_pie1, col_pie2 = st.columns(2)
         fig_stock = px.pie(pdf, values='cur_val', names='symbol', hole=0.4,
-                          title="Allocation by Stock", template="plotly_dark",
-                          color_discrete_sequence=px.colors.sequential.Teal)
+                           title="Allocation by Stock", template="plotly_dark",
+                           color_discrete_sequence=px.colors.sequential.Teal)
         fig_stock.update_layout(margin=dict(t=40,b=10,l=10,r=10), height=280)
         col_pie1.plotly_chart(fig_stock, use_container_width=True)
 
         damage_colors = {'HOLD': '#00FF88', 'TIGHTEN STOP': '#FFC107',
-                        'SCALE OUT 50%': '#FF9500', 'EXIT IMMEDIATE': '#FF4B4B'}
+                         'SCALE OUT 50%': '#FF9500', 'EXIT IMMEDIATE': '#FF4B4B'}
         fig_damage = px.bar(pdf, x='symbol', y='damage', color='verdict',
-                           color_discrete_map=damage_colors, template="plotly_dark",
-                           title="Exit Damage by Holding")
+                              color_discrete_map=damage_colors, template="plotly_dark",
+                              title="Exit Damage by Holding")
         fig_damage.update_layout(height=280, margin=dict(t=40,b=10,l=10,r=10))
         col_pie2.plotly_chart(fig_damage, use_container_width=True)
 
@@ -682,23 +628,25 @@ with tabs[1]:
                 pnl_color = "#00FF88" if row['pnl_pct'] > 0 else "#FF4B4B"
 
                 st.markdown(f"""
-                <div style="background:#1A1C24; padding:20px; border-radius:12px; border:1px solid #2D3748;">
-                <h2 style="margin:0;">{selected_stock}</h2>
-                <h3 style="color:{pnl_color}; margin:5px 0;">{row['pnl_pct']:+.1f}%</h3>
-                <p><b>Exit Verdict:</b> {badge}</p>
-                <p><b>Damage Score:</b> {row['damage']}/100</p>
-                <p><b>New Stop Loss:</b> Rs.{row['new_stop']:.1f}</p>
-                <p><b>Reasoning:</b> <span style="color:#CBD5E0;">{row['reasoning']}</span></p>
-                <hr style="border-color:#2D3748;">
-                <p><b>Entry:</b> Rs.{row['entry']:.1f} | <b>Qty:</b> {row['qty']}</p>
-                <p><b>CMP:</b> Rs.{row['cmp']:.1f} | <b>Target:</b> Rs.{row['locked_target']:.1f}</p>
-                <p><b>Days Held:</b> {row['days_held']} | <b>Invested:</b> Rs.{row['invested']:,.0f}</p>
-                <p><b>Current Value:</b> Rs.{row['cur_val']:,.0f} | <b>P&L:</b> Rs.{row['profit']:,.0f}</p>
+                <div style='background:#1A1C24;padding:15px;border-radius:10px;'>
+                    <h2 style='margin:0;'>{selected_stock}</h2>
+                    <div style='font-size:24px;font-weight:bold;color:{pnl_color};'>{row['pnl_pct']:+.1f}%</div>
+                    <div style='margin-top:10px;'><b>Exit Verdict:</b> <span style='color:{"#FF4B4B" if "EXIT" in badge else "#FFC107" if "SCALE" in badge else "#00FF88"};'>{badge}</span></div>
+                    <div style='margin-top:5px;'><b>Damage Score:</b> {row['damage']}/100</div>
+                    <div style='margin-top:5px;'><b>New Stop Loss:</b> Rs.{row['new_stop']:.1f}</div>
+                    <div style='margin-top:5px;font-size:12px;color:#888;'><b>Reasoning:</b><br/>{row['reasoning']}</div>
+                    <hr style='border-color:#333;'/>
+                    <div style='font-size:12px;'>
+                    <b>Entry:</b> Rs.{row['entry']:.1f} | <b>Qty:</b> {row['qty']}<<br/>
+                    <b>CMP:</b> Rs.{row['cmp']:.1f} | <b>Target:</b> Rs.{row['locked_target']:.1f}<br/>
+                    <b>Days Held:</b> {row['days_held']} | <b>Invested:</b> Rs.{row['invested']:,.0f}<br/>
+                    <b>Current Value:</b> Rs.{row['cur_val']:,.0f} | <b>P&L:</b> Rs.{row['profit']:,.0f}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 # Quick action buttons
-                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<br/>", unsafe_allow_html=True)
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
                     if st.button("🛡️ Update Stop Loss", key=f"update_stop_{selected_stock}"):
@@ -712,14 +660,14 @@ with tabs[1]:
             with col_chart:
                 render_interactive_chart(selected_stock, f"portfolio_{selected_stock}")
 
-                if not live_data.empty:
-                    g = live_data.iloc[0]
-                    st.markdown(f"""
-                    <div style="background:#1A1C24; padding:15px; border-radius:8px; margin-top:10px;">
-                    <b>Live Scan Data:</b> Score {g['SCORE']:.1f}/100 | Prob {g['PROBABILITY']:.1f}% | 
+            if not live_data.empty:
+                g = live_data.iloc[0]
+                st.markdown(f"""
+                <div style='background:#1A1C24;padding:10px;border-radius:8px;margin-top:10px;font-size:12px;'>
+                    <b>Live Scan Data:</b> Score {g['SCORE']:.1f}/100 | Prob {g['PROBABILITY']:.1f}% |
                     Pattern: {g['PATTERN']} | Regime: {g['REGIME']}
-                    </div>
-                    """, unsafe_allow_html=True)
+                </div>
+                """, unsafe_allow_html=True)
 
         # Bottom action bar
         st.markdown("---")
@@ -747,7 +695,7 @@ with tabs[1]:
                             "entry_target": target
                         }).execute()
                         st.success(f"Added {a_sym}!")
-                        st.rerun()
+                        safe_rerun()
 
         with col_a2:
             st.markdown("#### ➖ Register Sale")
@@ -781,7 +729,7 @@ with tabs[1]:
                         else:
                             supabase.table('portfolio').update({"qty": new_qty}).eq('id', holding['id']).execute()
                         st.success(f"Sold {s_sym}!")
-                        st.rerun()
+                        safe_rerun()
 
         with col_a3:
             st.markdown("#### 📤 Bulk Actions")
@@ -819,7 +767,7 @@ with tabs[2]:
                 custom_data=['BREADTH_PCT', 'AVG_SCORE', 'BULLISH_STOCKS', 'TOTAL_STOCKS']
             )
             fig_treemap.update_traces(
-                hovertemplate="<b>%{label}</b><br>Breadth: %{customdata[0]:.1f}%<br>Bullish: %{customdata[2]}/%{customdata[3]}<br>Avg Score: %{customdata[1]:.1f}"
+                hovertemplate="<b>%{label}</b><br>Breadth: %{customdata[0]:.1f}%<<br>Bullish: %{customdata[2]}/%{customdata[3]}<<br>Avg Score: %{customdata[1]:.1f}"
             )
             fig_treemap.update_layout(margin=dict(t=10,l=0,r=0,b=0), height=400, template='plotly_dark')
             st.plotly_chart(fig_treemap, use_container_width=True)
@@ -892,12 +840,12 @@ with tabs[3]:
                 col_info, col_chart = st.columns([1, 1.5])
                 with col_info:
                     st.markdown(f"""
-                    <div style="border-left:4px solid {status_color}; padding-left:15px;">
-                    <h3>{b['SYMBOL']}</h3>
-                    <p style="color:{status_color};"><b>{b['RADAR_STATUS']}</b></p>
-                    <p>Rs.{b['PRICE']:.1f} → Resistance Rs.{b['RESISTANCE']:.1f}</p>
-                    <p><b>Win Prob:</b> {b['PROBABILITY']:.1f}% | <b>Score:</b> {b['SCORE']:.1f}</p>
-                    <p><b>Action:</b> Cross Rs.{b['RESISTANCE']:.1f} after 1:30 PM = BUY</p>
+                    <div style='background:#1A1C24;padding:15px;border-radius:10px;border-left:4px solid {status_color};'>
+                        <h3 style='margin:0;'>{b['SYMBOL']}</h3>
+                        <div style='color:{status_color};font-weight:bold;'>{b['RADAR_STATUS']}</div>
+                        <div style='margin-top:8px;'>Rs.{b['PRICE']:.1f} → Resistance Rs.{b['RESISTANCE']:.1f}</div>
+                        <div style='margin-top:5px;font-size:12px;'>Win Prob: {b['PROBABILITY']:.1f}% | Score: {b['SCORE']:.1f}</div>
+                        <div style='margin-top:5px;font-size:12px;color:#888;'>Action: Cross Rs.{b['RESISTANCE']:.1f} after 1:30 PM = BUY</div>
                     </div>
                     """, unsafe_allow_html=True)
                 with col_chart:
@@ -908,7 +856,7 @@ with tabs[3]:
             st.subheader("📡 Full Radar")
             st.dataframe(
                 breakouts[['RADAR_STATUS', 'DIST_TO_RES_%', 'SYMBOL', 'SCORE', 'PROBABILITY',
-                          'PRICE', 'RESISTANCE', 'TARGET', 'RVOL']].sort_values('DIST_TO_RES_%')
+                           'PRICE', 'RESISTANCE', 'TARGET', 'RVOL']].sort_values('DIST_TO_RES_%')
                 .style.format({'PRICE': 'Rs.{:.1f}', 'RESISTANCE': 'Rs.{:.1f}', 'TARGET': 'Rs.{:.1f}'}),
                 use_container_width=True, hide_index=True
             )
@@ -931,9 +879,9 @@ with tabs[4]:
 
             st.dataframe(
                 penny_df[['VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'PATTERN', 'EST_PERIOD',
-                         'PRICE', 'TARGET', 'UPSIDE_%', 'RVOL']]
+                          'PRICE', 'TARGET', 'UPSIDE_%', 'RVOL']]
                 .style.format({'PRICE': 'Rs.{:.1f}', 'TARGET': 'Rs.{:.1f}', 'UPSIDE_%': '{:.1f}%',
-                              'PROBABILITY': '{:.1f}%', 'SCORE': '{:.1f}'}),
+                               'PROBABILITY': '{:.1f}%', 'SCORE': '{:.1f}'}),
                 column_config={
                     "SCORE": st.column_config.ProgressColumn("Score", format="%.1f", min_value=0, max_value=100),
                     "PROBABILITY": st.column_config.ProgressColumn("Win Prob", format="%.1f%%", min_value=0, max_value=100),
@@ -947,9 +895,9 @@ with tabs[4]:
             if not high_vol.empty:
                 for _, p in high_vol.iterrows():
                     st.markdown(f"""
-                    <div style="background:#1A1C24; padding:15px; border-radius:8px; border-left:4px solid #FF9500;">
-                    <b>{p['SYMBOL']}</b> experiencing massive volume ({p['RVOL']:.1f}x normal). 
-                    Operator activity detected. High risk - use strict stop at Rs.{p['SUPPORT']:.1f}.
+                    <div style='background:#1A1C24;padding:10px;border-radius:8px;'>
+                        <b>{p['SYMBOL']}</b> experiencing massive volume ({p['RVOL']:.1f}x normal).
+                        Operator activity detected. High risk - use strict stop at Rs.{p['SUPPORT']:.1f}.
                     </div>
                     """, unsafe_allow_html=True)
         else:
@@ -965,7 +913,7 @@ with tabs[5]:
     col_h1, col_h2 = st.columns([1, 1])
     owner_choice = col_h1.selectbox("Account", sorted(hist_owners))
     time_filter = col_h2.selectbox("Period", ["All Time", "Today", "This Week", "This Month",
-                                              "Financial Year", "Custom Range"])
+                                                "Financial Year", "Custom Range"])
 
     active_hist = hist_df[hist_df['owner'] == owner_choice] if not hist_df.empty else pd.DataFrame()
 
@@ -1018,7 +966,7 @@ with tabs[5]:
             st.markdown("---")
             st.dataframe(
                 filtered_hist[['symbol', 'buy_price', 'sell_price', 'pl_percentage',
-                              'realized_pl', 'exit_reason', 'sell_date']].sort_values('sell_date', ascending=False)
+                               'realized_pl', 'exit_reason', 'sell_date']].sort_values('sell_date', ascending=False)
                 .style.format({"sell_price": "Rs.{:.1f}", "buy_price": "Rs.{:.1f}",
                               "realized_pl": "Rs.{:.0f}", "pl_percentage": "{:.1f}%"})
                 .map(style_pnl, subset=['realized_pl']),
@@ -1034,7 +982,7 @@ with tabs[5]:
                 Avg_PL=('realized_pl', 'mean')
             ).reset_index()
             st.dataframe(reason_perf.style.format({'Win_Rate': '{:.1f}%', 'Avg_PL': 'Rs.{:.0f}'}),
-                        use_container_width=True)
+                         use_container_width=True)
         else:
             st.info(f"No trades in {time_filter}.")
     else:
@@ -1065,48 +1013,40 @@ with tabs[6]:
     st.markdown("---")
     st.subheader("🎓 Trading Rules for Your Strategy")
     st.markdown("""
-    <div class="knowledge-box">
-    <h4>📋 Your Strategy Parameters</h4>
-    <b>Capital per Trade:</b> Rs.10,000<br>
-    <b>Max Trades/Day:</b> 5<br>
-    <b>Target Hold:</b> 5-10 days<br>
-    <b>Minimum Target:</b> 10% profit<br>
-    <b>Stop Loss:</b> 1.8 x ATR (typically 6-8%)<br>
-    <b>Entry Filter:</b> Probability >= 60%, Score >= 60<br><br>
-
-    <b>🟢 BUY Rules:</b><br>
-    1. Only enter if Win Probability >= 60%<br>
-    2. Ensure R:R ratio >= 1:1.5<br>
-    3. Check market regime is Bull or Strong Bull<br>
-    4. Verify no earnings in next 7 days<br>
-    5. Max 5 positions per day<br><br>
-
-    <b>🔴 SELL Rules:</b><br>
-    1. If Damage Score >= 80 -> EXIT IMMEDIATE<br>
-    2. If Damage Score 56-80 -> SCALE OUT 50%<br>
-    3. If target hit -> Sell 50%, trail rest with breakeven stop<br>
-    4. If held >14 days with <2% profit -> Consider exit<br>
+    #### 📋 Your Strategy Parameters
+    **Capital per Trade:** Rs.10,000
+    **Max Trades/Day:** 5
+    **Target Hold:** 5-10 days
+    **Minimum Target:** 10% profit
+    **Stop Loss:** 1.8 x ATR (typically 6-8%)
+    **Entry Filter:** Probability >= 60%, Score >= 60
+    **🟢 BUY Rules:**
+    1. Only enter if Win Probability >= 60%
+    2. Ensure R:R ratio >= 1:1.5
+    3. Check market regime is Bull or Strong Bull
+    4. Verify no earnings in next 7 days
+    5. Max 5 positions per day
+    **🔴 SELL Rules:**
+    1. If Damage Score >= 80 -> EXIT IMMEDIATE
+    2. If Damage Score 56-80 -> SCALE OUT 50%
+    3. If target hit -> Sell 50%, trail rest with breakeven stop
+    4. If held >14 days with <2% profit -> Consider exit
     5. If gap down >10% -> Emergency exit
-    </div>
     """, unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("🤖 How to Use Titan Agent")
     st.markdown("""
-    <div class="knowledge-box">
-    <h4>💬 Chat Commands</h4>
-    <b>Type natural language:</b><br>
-    • "Bought 50 RELIANCE at 2450" -> Auto-detects and suggests adding to portfolio<br>
-    • "How is my portfolio?" -> Shows summary<br>
-    • "Top picks today?" -> Shows best opportunities<br>
-    • "How is the market?" -> Shows regime status<br><br>
-
-    <b>📷 Upload Screenshots:</b><br>
-    • Take screenshot of your broker order (Zerodha/Groww/Upstox)<br>
-    • Upload to the sidebar agent<br>
-    • Titan Agent reads it via OCR<br>
-    • Confirm to auto-add to portfolio<br><br>
-
-    <b>Supported Brokers:</b> Zerodha, Groww, Upstox, Angel One (basic)
-    </div>
+    #### 💬 Chat Commands
+    **Type natural language:**
+    • "Bought 50 RELIANCE at 2450" -> Auto-detects and suggests adding to portfolio
+    • "How is my portfolio?" -> Shows summary
+    • "Top picks today?" -> Shows best opportunities
+    • "How is the market?" -> Shows regime status
+    **📷 Upload Screenshots:**
+    • Take screenshot of your broker order (Zerodha/Groww/Upstox)
+    • Upload to the sidebar agent
+    • Titan Agent reads it via OCR
+    • Confirm to auto-add to portfolio
+    **Supported Brokers:** Zerodha, Groww, Upstox, Angel One (basic)
     """, unsafe_allow_html=True)

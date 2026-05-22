@@ -1,3 +1,4 @@
+import pandas_ta as ta  # REQUIRED to register the .ta accessor
 import streamlit as st
 import pandas as pd
 from supabase import create_client

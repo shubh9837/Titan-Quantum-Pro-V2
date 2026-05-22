@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
-import pandas_ta_classic as ta
+import pandas_ta as ta
 import numpy as np
 import yfinance as yf
 import pytz
+import datetime  # <-- ADD THIS LINE (was missing!)
 import plotly.graph_objects as go
 import plotly.express as px
 from supabase import create_client

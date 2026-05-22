@@ -3,12 +3,16 @@ Titan Quantum Pro V2 - Master EOD Scanner
 Runs at 5:00 AM IST and 5:00 PM IST via GitHub Actions.
 """
 import pandas as pd
-import numpy as np
 import pandas_ta as ta  # REQUIRED to register the .ta accessor
+import numpy as np
 import yfinance as yf
 import time, os
 from supabase import create_client
 from probability_core import ProbabilityEngine
+
+# Pandas 2.0+ compatibility patch for pandas_ta
+if not hasattr(pd.Series, "append"):
+    pd.Series.append = pd.Series._append
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -83,7 +87,7 @@ if __name__ == "__main__":
         print(f"\n📥 Batch {i+1}-{min(i+CHUNK_SIZE, len(symbols))}...")
 
         try:
-            data = yf.download(chunk, period="1y", group_by="ticker", threads=True, ignore_tz=True)
+            data = yf.download(chunk, period="1y", group_by="ticker", threads=False, ignore_tz=True)
             time.sleep(1)
         except Exception as e:
             print(f"Chunk download failed: {e}")
@@ -162,13 +166,11 @@ if __name__ == "__main__":
 
                 # Probability calculation
                 sector = str(sector_map.get(t, "Unknown"))
-                sector_breadth = 50  # Will be refined after full scan
+                sector_breadth = 50 # Will be refined after full scan
 
-# After downloading nifty_data at the top, pass it to the engine
-confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
-    df, nifty_return_50d, sector_breadth, market_sentiment, 
-    session_info=None, nifty_df_full=nifty_data  # <-- ADD THIS
-)
+                confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
+                    df, nifty_return_50d, sector_breadth, market_sentiment, session_info=None, nifty_df_full=nifty_data
+                )
 
                 # ATR-based targets + Monte Carlo (7-day hold for your strategy)
                 atr = safe_float(df['ATRr_14'].iloc[-1]) if 'ATRr_14' in df else 0

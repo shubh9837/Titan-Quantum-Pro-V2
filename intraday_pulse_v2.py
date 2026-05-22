@@ -4,11 +4,15 @@ Updates live prices and recalculates scores with session-aware logic.
 """
 import os, time, datetime
 import pandas as pd
-import numpy as np
 import pandas_ta as ta  # REQUIRED to register the .ta accessor
+import numpy as np
 import yfinance as yf
 from supabase import create_client
 from probability_core import ProbabilityEngine
+
+# Pandas 2.0+ compatibility patch for pandas_ta
+if not hasattr(pd.Series, "append"):
+    pd.Series.append = pd.Series._append
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -28,8 +32,8 @@ def update_live_prices():
     for i in range(0, len(symbols), 300):
         chunk = symbols[i:i+300]
         try:
-data = yf.download(chunk, period="5d", group_by="ticker", threads=False, ignore_tz=True)
-for t in chunk:
+            data = yf.download(chunk, period="5d", group_by="ticker", threads=False, ignore_tz=True)
+            for t in chunk:
                 try:
                     if len(chunk) > 1 and isinstance(data.columns, pd.MultiIndex):
                         if t not in data.columns.get_level_values(0).unique(): continue
@@ -82,6 +86,7 @@ def intraday_score_update():
         nifty_return_50d = (nifty_data['Close'].iloc[-1] - nifty_data['Close'].iloc[-50]) / nifty_data['Close'].iloc[-50]
     except:
         nifty_return_50d = 0.0
+        nifty_data = pd.DataFrame()
 
     # Sector breadth
     try:
@@ -91,54 +96,74 @@ def intraday_score_update():
     except:
         sector_breadth_map = {}
 
+    # Build symbol-to-sector map
+    symbol_to_sector = {}
+    if 'SECTOR' in existing.columns:
+        symbol_to_sector = dict(zip(existing['SYMBOL'], existing['SECTOR']))
+
     updates = []
-    for _, row in existing.iterrows():
-        sym = row['SYMBOL']
+    symbols_to_update = [f"{row['SYMBOL']}.NS" for _, row in existing.iterrows()]
+
+    for i in range(0, len(symbols_to_update), 100):
+        chunk = symbols_to_update[i:i+100]
+        print(f"📥 Intraday batch {i+1}-{min(i+100, len(symbols_to_update))}...")
         try:
-            hist = yf.download(f"{sym}.NS", period="3mo", progress=False, ignore_tz=True)
-            if isinstance(hist.columns, pd.MultiIndex):
-                hist.columns = [c[0] for c in hist.columns]
-            if hist.empty or len(hist) < 30: continue
-
-            hist.ta.ema(length=20, append=True)
-            hist.ta.ema(length=50, append=True)
-            hist.ta.rsi(length=14, append=True)
-            hist.ta.macd(fast=12, slow=26, signal=9, append=True)
-            hist.ta.atr(length=14, append=True)
-            hist.ta.bbands(length=20, append=True)
-            hist['Vol_20_MA'] = hist['Volume'].rolling(window=20).mean()
-
-            sector = row.get('SECTOR', 'Unknown')
-            sector_breadth = sector_breadth_map.get(sector, 50)
-
-            # In intraday_score_update(), after downloading nifty_data, pass it:
-confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
-    hist, nifty_return_50d, sector_breadth, 0.0, 
-    session_info=session_info, nifty_df_full=nifty_data  # <-- ADD THIS
-)
-
-            # Override price with latest
-            curr_p = safe_float(hist['Close'].iloc[-1])
-            atr = safe_float(hist['ATRr_14'].iloc[-1]) if 'ATRr_14' in hist else 0
-            target = max(curr_p * 1.10, curr_p + (2.5 * atr))
-            stop = curr_p - (1.8 * atr)
-
-            updates.append({
-                "SYMBOL": sym,
-                "PRICE": round(curr_p, 2),
-                "SCORE": round(confluence, 1),
-                "PROBABILITY": round(prob, 1),
-                "REGIME": regime_name,
-                "TARGET": round(target, 2),
-                "STOP_LOSS": round(stop, 2),
-                "UPDATED_AT": time.strftime('%Y-%m-%d %H:%M:%S')
-            })
-
-            if len(updates) >= 50:
-                supabase.table('market_scans').upsert(updates, on_conflict="SYMBOL").execute()
-                updates = []
+            batch_data = yf.download(chunk, period="3mo", group_by="ticker", threads=False, ignore_tz=True)
+            time.sleep(1)
         except Exception as e:
+            print(f"Batch download failed: {e}")
             continue
+
+        for sym in chunk:
+            try:
+                if len(chunk) > 1 and isinstance(batch_data.columns, pd.MultiIndex):
+                    if sym not in batch_data.columns.get_level_values(0).unique():
+                        continue
+                    hist = batch_data[sym].copy()
+                else:
+                    hist = batch_data.copy()
+
+                hist.dropna(inplace=True)
+                if hist.empty or len(hist) < 30:
+                    continue
+
+                hist.ta.ema(length=20, append=True)
+                hist.ta.ema(length=50, append=True)
+                hist.ta.rsi(length=14, append=True)
+                hist.ta.macd(fast=12, slow=26, signal=9, append=True)
+                hist.ta.atr(length=14, append=True)
+                hist.ta.bbands(length=20, append=True)
+                hist['Vol_20_MA'] = hist['Volume'].rolling(window=20).mean()
+
+                sector = symbol_to_sector.get(sym.replace('.NS', ''), 'Unknown')
+                sector_breadth = sector_breadth_map.get(sector, 50)
+
+                confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
+                    hist, nifty_return_50d, sector_breadth, 0.0, session_info=session_info, nifty_df_full=nifty_data
+                )
+
+                # Override price with latest
+                curr_p = safe_float(hist['Close'].iloc[-1])
+                atr = safe_float(hist['ATRr_14'].iloc[-1]) if 'ATRr_14' in hist else 0
+                target = max(curr_p * 1.10, curr_p + (2.5 * atr))
+                stop = curr_p - (1.8 * atr)
+
+                updates.append({
+                    "SYMBOL": sym.replace(".NS", ""),
+                    "PRICE": round(curr_p, 2),
+                    "SCORE": round(confluence, 1),
+                    "PROBABILITY": round(prob, 1),
+                    "REGIME": regime_name,
+                    "TARGET": round(target, 2),
+                    "STOP_LOSS": round(stop, 2),
+                    "UPDATED_AT": time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+
+                if len(updates) >= 50:
+                    supabase.table('market_scans').upsert(updates, on_conflict="SYMBOL").execute()
+                    updates = []
+            except Exception as e:
+                continue
 
     if updates:
         supabase.table('market_scans').upsert(updates, on_conflict="SYMBOL").execute()

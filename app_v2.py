@@ -1,4 +1,3 @@
-import pandas_ta as ta  # REQUIRED to register the .ta accessor
 import streamlit as st
 import pandas as pd
 from supabase import create_client
@@ -8,6 +7,7 @@ import yfinance as yf
 import pytz
 import plotly.graph_objects as go
 import plotly.express as px
+import pandas_ta as ta  # REQUIRED to register the .ta accessor
 from probability_core import ProbabilityEngine
 from titan_agent import parse_trade_text, parse_order_image, get_response
 

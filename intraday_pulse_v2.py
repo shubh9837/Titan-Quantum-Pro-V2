@@ -111,9 +111,11 @@ def intraday_score_update():
             sector = row.get('SECTOR', 'Unknown')
             sector_breadth = sector_breadth_map.get(sector, 50)
 
-            confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
-                hist, nifty_return_50d, sector_breadth, 0.0, session_info=session_info
-            )
+            # In intraday_score_update(), after downloading nifty_data, pass it:
+confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
+    hist, nifty_return_50d, sector_breadth, 0.0, 
+    session_info=session_info, nifty_df_full=nifty_data  # <-- ADD THIS
+)
 
             # Override price with latest
             curr_p = safe_float(hist['Close'].iloc[-1])

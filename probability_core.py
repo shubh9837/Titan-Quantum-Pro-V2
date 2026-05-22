@@ -89,8 +89,8 @@ class ProbabilityEngine:
         else:
             return "Sideways", 0.90
 
-    def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth, 
-                                   market_sentiment, session_info=None):
+def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth,
+                                market_sentiment, session_info=None, nifty_df_full=None):
         """
         Calculates Bayesian probability of trade success.
         session_info = (conf_mult, expected_vol_pct, session_label) for intraday.
@@ -190,11 +190,12 @@ class ProbabilityEngine:
                 base_rate = rate
                 break
 
-        # Regime
-        nifty_df_full = yf.download("^NSEI", period="6mo", progress=False, ignore_tz=True)
-        if isinstance(nifty_df_full.columns, pd.MultiIndex):
-            nifty_df_full.columns = [c[0] for c in nifty_df_full.columns]
-        regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
+# Use passed NIFTY data, fallback to download only if not provided
+if nifty_df_full is None or nifty_df_full.empty:
+    nifty_df_full = yf.download("^NSEI", period="6mo", progress=False, ignore_tz=True)
+    if isinstance(nifty_df_full.columns, pd.MultiIndex):
+        nifty_df_full.columns = [c[0] for c in nifty_df_full.columns]
+regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
 
         # Sector
         sector_mult = 0.85 + (sector_breadth * 0.003) if sector_breadth else 1.0

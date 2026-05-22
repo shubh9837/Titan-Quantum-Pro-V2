@@ -1,5 +1,5 @@
 pandas==2.2.2
-numpy==1.26.4
+numpy
 yfinance==0.2.43
 pandas-ta
 supabase==2.6.0

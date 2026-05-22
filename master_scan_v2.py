@@ -164,9 +164,11 @@ if __name__ == "__main__":
                 sector = str(sector_map.get(t, "Unknown"))
                 sector_breadth = 50  # Will be refined after full scan
 
-                confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
-                    df, nifty_return_50d, sector_breadth, market_sentiment, session_info=None
-                )
+# After downloading nifty_data at the top, pass it to the engine
+confluence, prob, regime_name, regime_mult, session_label = engine.calculate_entry_probability(
+    df, nifty_return_50d, sector_breadth, market_sentiment, 
+    session_info=None, nifty_df_full=nifty_data  # <-- ADD THIS
+)
 
                 # ATR-based targets + Monte Carlo (7-day hold for your strategy)
                 atr = safe_float(df['ATRr_14'].iloc[-1]) if 'ATRr_14' in df else 0

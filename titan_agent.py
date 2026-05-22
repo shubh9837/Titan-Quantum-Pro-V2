@@ -11,10 +11,10 @@ def parse_trade_text(text):
     """
     Parse natural language trade commands.
     Examples:
-      - "Bought 50 RELIANCE at 2450"
-      - "sell 20 tcs @ 3500"
-      - "Added 100 INFY 1450.50"
-      - "exit all tcs"
+    - "Bought 50 RELIANCE at 2450"
+    - "sell 20 tcs @ 3500"
+    - "Added 100 INFY 1450.50"
+    - "exit all tcs"
     Returns dict or None.
     """
     text = text.upper().strip()
@@ -90,16 +90,15 @@ def parse_order_image(image_file):
         for pat in patterns:
             match = re.search(pat, text)
             if match:
-                # Determine groups based on pattern
                 groups = match.groups()
                 if len(groups) == 4:
-                    action = groups[0] if groups[0] in ['BUY', 'SELL'] else groups[1]
-                    symbol = groups[1] if groups[1] not in ['BUY', 'SELL'] else groups[0]
-                    qty_str = groups[2] if groups[2].isdigit() else groups[3]
-                    price_str = groups[3] if not groups[3].isdigit() else groups[2]
-
-                    # Handle case where action/symbol are swapped
-                    if groups[0] not in ['BUY', 'SELL']:
+                    # Determine which group is action and which is symbol
+                    if groups[0] in ['BUY', 'SELL']:
+                        action = groups[0]
+                        symbol = groups[1]
+                        qty_str = groups[2]
+                        price_str = groups[3]
+                    else:
                         symbol = groups[0]
                         action = groups[1]
                         qty_str = groups[2]

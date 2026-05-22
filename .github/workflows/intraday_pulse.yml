@@ -2,7 +2,7 @@ name: Intraday Pulse
 
 on:
   schedule:
-    - cron: '*/15 3-10 * * 1-5'  # Every 15 min from 8:30 AM to 4:00 PM UTC
+  - cron: '15/15 4-10 * * 1-5'
   workflow_dispatch:
 
 jobs:

@@ -1,1 +1,24 @@
+name: Master EOD Scan
 
+on:
+  schedule:
+    - cron: '30 23 * * *'  # 5:00 AM IST (11:30 PM UTC prev day)
+    - cron: '30 11 * * *'  # 5:00 PM IST (11:30 AM UTC)
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements_v2.txt
+      - name: Run Master Scan
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python master_scan_v2.py

@@ -28,8 +28,8 @@ def update_live_prices():
     for i in range(0, len(symbols), 300):
         chunk = symbols[i:i+300]
         try:
-            data = yf.download(chunk, period="5d", group_by="ticker", threads=True, ignore_tz=True)
-            for t in chunk:
+data = yf.download(chunk, period="5d", group_by="ticker", threads=False, ignore_tz=True)
+for t in chunk:
                 try:
                     if len(chunk) > 1 and isinstance(data.columns, pd.MultiIndex):
                         if t not in data.columns.get_level_values(0).unique(): continue

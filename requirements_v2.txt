@@ -1,7 +1,7 @@
 pandas==2.2.2
 numpy==1.26.4
 yfinance==0.2.43
-pandas-ta-classic
+pandas-ta
 supabase==2.6.0
 vaderSentiment==3.3.2
 feedparser==6.0.11

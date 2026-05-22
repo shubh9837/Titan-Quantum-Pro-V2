@@ -36,7 +36,7 @@ class ProbabilityEngine:
         # Elapsed minutes since 9:15
         market_open = ist_time.replace(hour=9, minute=15, second=0)
         elapsed = max(0, (ist_time - market_open).total_seconds() / 60)
-        total_session = 375.0  # 6h 15m
+        total_session = 375.0 # 6h 15m
         time_pct = elapsed / total_session
 
         # Volume expectation curve: heavier in first/last hour
@@ -89,8 +89,8 @@ class ProbabilityEngine:
         else:
             return "Sideways", 0.90
 
-def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth,
-                                market_sentiment, session_info=None, nifty_df_full=None):
+    def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth,
+                                    market_sentiment, session_info=None, nifty_df_full=None):
         """
         Calculates Bayesian probability of trade success.
         session_info = (conf_mult, expected_vol_pct, session_label) for intraday.
@@ -177,11 +177,11 @@ def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth,
         safety_score = 0
         if market_sentiment > 0.3: safety_score += 5
         elif market_sentiment > 0: safety_score += 3
-        safety_score += 5  # Base earnings safety
+        safety_score += 5 # Base earnings safety
 
         # --- TOTAL ---
-        confluence = min(100, trend_score + momentum_score + structure_score + 
-                        vol_score + rs_score + safety_score)
+        confluence = min(100, trend_score + momentum_score + structure_score +
+                         vol_score + rs_score + safety_score)
 
         # --- BAYESIAN PROBABILITY ---
         base_rate = 0.15
@@ -190,12 +190,12 @@ def calculate_entry_probability(self, df, nifty_return_50d, sector_breadth,
                 base_rate = rate
                 break
 
-# Use passed NIFTY data, fallback to download only if not provided
-if nifty_df_full is None or nifty_df_full.empty:
-    nifty_df_full = yf.download("^NSEI", period="6mo", progress=False, ignore_tz=True)
-    if isinstance(nifty_df_full.columns, pd.MultiIndex):
-        nifty_df_full.columns = [c[0] for c in nifty_df_full.columns]
-regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
+        # Regime - reuse passed NIFTY data instead of re-downloading
+        if nifty_df_full is None or nifty_df_full.empty:
+            nifty_df_full = yf.download("^NSEI", period="6mo", progress=False, ignore_tz=True)
+            if isinstance(nifty_df_full.columns, pd.MultiIndex):
+                nifty_df_full.columns = [c[0] for c in nifty_df_full.columns]
+        regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
 
         # Sector
         sector_mult = 0.85 + (sector_breadth * 0.003) if sector_breadth else 1.0
@@ -237,7 +237,7 @@ regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
         ema50 = close_s.ewm(span=50, adjust=False).mean().iloc[-1]
         sup_20 = safe_float(current_df['Low'].rolling(20).min().iloc[-1])
 
-        if curr_p < ema20: 
+        if curr_p < ema20:
             damage += 15
             reasons.append("Broke 20 EMA")
         if close_s.iloc[-1] < ema50 and close_s.iloc[-5] > ema50:
@@ -252,7 +252,7 @@ regime_name, regime_mult = self.detect_market_regime(nifty_df_full)
 
         # --- MOMENTUM REVERSAL (0-30) ---
         rsi = safe_float(current_df['RSI_14'].iloc[-1]) if 'RSI_14' in current_df else 50
-        if rsi < 30: 
+        if rsi < 30:
             damage += 20
             reasons.append("RSI oversold (<30)")
         elif rsi < 40:

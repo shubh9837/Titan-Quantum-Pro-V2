@@ -2,6 +2,7 @@
 Titan Quantum Pro V2 - Intraday Pulse
 Updates live prices and recalculates scores with session-aware logic.
 """
+import pandas_ta as ta  # REQUIRED to register the .ta accessor
 import os, time, datetime
 import pandas as pd
 import numpy as np

@@ -1,1 +1,23 @@
+name: Intraday Pulse
 
+on:
+  schedule:
+    - cron: '*/15 3-10 * * 1-5'  # Every 15 min from 8:30 AM to 4:00 PM UTC
+  workflow_dispatch:
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements_v2.txt
+      - name: Run Intraday Sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python intraday_pulse_v2.py

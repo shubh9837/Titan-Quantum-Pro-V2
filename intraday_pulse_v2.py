@@ -28,11 +28,13 @@ def update_live_prices():
     master = pd.read_csv("Tickers.csv")
     symbols = [f"{str(s).strip()}.NS" for s in master['SYMBOL'].dropna().unique()]
 
-    updates = []
-    for i in range(0, len(symbols), 300):
-        chunk = symbols[i:i+300]
+updates = []
+    for i in range(0, len(symbols), 50): # Reduced to 50
+        chunk = symbols[i:i+50] # Reduced to 50
         try:
+            # Turned threads off
             data = yf.download(chunk, period="5d", group_by="ticker", threads=False, ignore_tz=True)
+            time.sleep(1) # Added a small delay
             for t in chunk:
                 try:
                     if len(chunk) > 1 and isinstance(data.columns, pd.MultiIndex):

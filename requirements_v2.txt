@@ -1,6 +1,7 @@
 pandas==2.2.2
 numpy
 yfinance==0.2.43
+pandas_ta
 pandas-ta
 supabase==2.6.0
 vaderSentiment==3.3.2

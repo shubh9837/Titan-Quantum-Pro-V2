@@ -6,6 +6,11 @@ import re
 import pandas as pd
 from PIL import Image
 import pytesseract
+import os # <-- Add this
+
+# Force path for Streamlit Cloud Linux environment
+if os.path.exists('/usr/bin/tesseract'):
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 def parse_trade_text(text):
     """

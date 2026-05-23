@@ -773,10 +773,9 @@ if not active_port.empty:
             if st.button("📊 Export Portfolio CSV", use_container_width=True):
                 csv = pdf.to_csv(index=False)
                 st.download_button("Download", csv, "portfolio_export.csv", "text/csv")
-
-    else:
-        st.info(f"No active holdings in {selected_owner}.")
-        st.markdown(KNOWLEDGE["damage"], unsafe_allow_html=True)
+            else:
+                st.info(f"No active holdings in {selected_owner}.")
+                st.markdown(KNOWLEDGE["damage"], unsafe_allow_html=True)
 
 # ==========================================
 # TAB 2: MARKET SCREENER

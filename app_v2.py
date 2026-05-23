@@ -118,9 +118,19 @@ def get_index_data(ticker_symbol):
     except:
         return None, None
 
+@st.cache_data(ttl=300)
+def fetch_chart_data(symbol):
+    try:
+        return yf.download(f"{symbol}.NS", period="3mo", progress=False)
+    except:
+        return pd.DataFrame()
+# --------------------------------------------------------
+
 def render_interactive_chart(symbol, unique_key_suffix=""):
     try:
-        data = yf.download(f"{symbol}.NS", period="3mo", progress=False)
+        # Use the cached data instead of calling yf.download directly
+        data = fetch_chart_data(symbol).copy() 
+        
         if data.empty:
             return st.error(f"Chart data unavailable for {symbol}.")
 

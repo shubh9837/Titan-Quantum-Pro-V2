@@ -28,13 +28,12 @@ def update_live_prices():
     master = pd.read_csv("Tickers.csv")
     symbols = [f"{str(s).strip()}.NS" for s in master['SYMBOL'].dropna().unique()]
 
-updates = []
-    for i in range(0, len(symbols), 50): # Reduced to 50
-        chunk = symbols[i:i+50] # Reduced to 50
+    updates = []
+    for i in range(0, len(symbols), 50):
+        chunk = symbols[i:i+50]
         try:
-            # Turned threads off
             data = yf.download(chunk, period="5d", group_by="ticker", threads=False, ignore_tz=True)
-            time.sleep(1) # Added a small delay
+            time.sleep(1)
             for t in chunk:
                 try:
                     if len(chunk) > 1 and isinstance(data.columns, pd.MultiIndex):
@@ -62,7 +61,7 @@ updates = []
     if updates:
         supabase.table('market_scans').upsert(updates, on_conflict="SYMBOL").execute()
     print("✅ Prices updated.")
-
+    
 def intraday_score_update():
     """Recalculates scores for top 200 stocks with session-aware logic."""
     print("📊 Intraday Score Recalculation...")

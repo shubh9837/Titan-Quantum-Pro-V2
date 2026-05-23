@@ -3,7 +3,7 @@ Titan Quantum Pro V2 - Master EOD Scanner
 Runs at 5:00 AM IST and 5:00 PM IST via GitHub Actions.
 """
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta_classic as ta
 import numpy as np
 import yfinance as yf
 import time, os

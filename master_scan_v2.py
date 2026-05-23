@@ -78,7 +78,7 @@ if __name__ == "__main__":
     results = []
     success_count = 0
     BATCH_SIZE = 100
-CHUNK_SIZE = 50  # Reduced chunk size
+    CHUNK_SIZE = 50
 
     print(f"Scanning {len(symbols)} stocks in chunks...")
 
@@ -87,7 +87,6 @@ CHUNK_SIZE = 50  # Reduced chunk size
         print(f"\n📥 Batch {i+1}-{min(i+CHUNK_SIZE, len(symbols))}...")
 
         try:
-            # Turned threads off and increased sleep
             data = yf.download(chunk, period="1y", group_by="ticker", threads=False, ignore_tz=True)
             time.sleep(2)
         except Exception as e:

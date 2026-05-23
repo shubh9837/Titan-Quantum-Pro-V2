@@ -151,6 +151,7 @@ def render_interactive_chart(symbol, unique_key_suffix=""):
     except Exception as e:
         st.error(f"Chart error: {str(e)}")
 
+@st.cache_data(ttl=300)
 def get_macro_weather():
     try:
         ist = pytz.timezone('Asia/Kolkata')
@@ -496,9 +497,23 @@ with tabs[1]:
     selected_owner = st.selectbox("Select Portfolio", sorted(all_owners))
     active_port = port_df[port_df['owner'] == selected_owner] if not port_df.empty else pd.DataFrame()
 
-    if not active_port.empty:
+if not active_port.empty:
         port_calc = []
         total_damage = 0
+
+        # --- NEW: Bulk Fetch to prevent yfinance bans ---
+        @st.cache_data(ttl=300)
+        def fetch_portfolio_history(symbols):
+            tickers = [f"{sym}.NS" for sym in symbols]
+            try:
+                data = yf.download(tickers, period="3mo", group_by="ticker", progress=False, ignore_tz=True)
+                return data
+            except:
+                return pd.DataFrame()
+
+        port_symbols = active_port['symbol'].unique().tolist()
+        bulk_hist_data = fetch_portfolio_history(port_symbols)
+        # ------------------------------------------------
 
         for _, row in active_port.iterrows():
             sym = row['symbol']
@@ -508,11 +523,14 @@ with tabs[1]:
             entry = float(row['entry_price'])
             qty = int(row['qty'])
 
-            # Fetch technicals for exit engine
+            # --- NEW: Extract from bulk data instead of downloading ---
             try:
-                hist_data = yf.download(f"{sym}.NS", period="3mo", progress=False, ignore_tz=True)
-                if isinstance(hist_data.columns, pd.MultiIndex):
-                    hist_data.columns = [c[0] for c in hist_data.columns]
+                if len(port_symbols) > 1 and isinstance(bulk_hist_data.columns, pd.MultiIndex):
+                    hist_data = bulk_hist_data[f"{sym}.NS"].copy()
+                else:
+                    hist_data = bulk_hist_data.copy()
+                
+                hist_data.dropna(inplace=True)
                 hist_data.ta.ema(length=20, append=True)
                 hist_data.ta.ema(length=50, append=True)
                 hist_data.ta.rsi(length=14, append=True)
@@ -520,6 +538,7 @@ with tabs[1]:
                 hist_data.ta.atr(length=14, append=True)
             except:
                 hist_data = pd.DataFrame()
+            # ----------------------------------------------------------
 
             entry_date = row.get('date', datetime.date.today())
             damage, verdict, new_stop, reasoning = engine.calculate_exit_damage(

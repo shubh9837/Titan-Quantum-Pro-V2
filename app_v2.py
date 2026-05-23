@@ -212,14 +212,32 @@ def get_macro_weather():
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.datetime.now(ist)
 
-        if now_ist.hour < 9 or (now_ist.hour == 9 and now_ist.minute < 15):
+        # Midnight to 8:59 AM IST: International / Global Cues
+        if now_ist.hour < 9:
             gift, gift_pct = get_index_data("GIFNIF.NS")
             sp500, sp_pct = get_index_data("^GSPC")
+            nasdaq, nas_pct = get_index_data("^IXIC")
+
+            # Determine dominant global direction
             direction = gift_pct if gift_pct is not None else sp_pct if sp_pct is not None else 0
-            status = "🟢 PRE-MARKET: POSITIVE" if direction > 0.2 else "🔴 PRE-MARKET: NEGATIVE" if direction < -0.2 else "🟡 PRE-MARKET: FLAT"
-            css = "green" if direction > 0.2 else "red" if direction < -0.2 else "yellow"
-            msg = f"GIFT Nifty: {gift:.2f} ({gift_pct:+.0f}%) | S&P 500: {sp500:.2f} ({sp_pct:+.0f}%)" if gift else "Pre-market data loading..."
+            
+            if direction > 0.4:
+                status = "🟢 GLOBAL CUES: POSITIVE"
+                css = "green"
+                outlook = "Expect a Gap-Up or strong positive opening in Indian markets."
+            elif direction < -0.4:
+                status = "🔴 GLOBAL CUES: NEGATIVE"
+                css = "red"
+                outlook = "Expect a Gap-Down or weak opening in Indian markets. Caution advised."
+            else:
+                status = "🟡 GLOBAL CUES: FLAT/MIXED"
+                css = "yellow"
+                outlook = "Expect a flat opening. Market will look for domestic cues."
+
+            msg = f"GIFT Nifty: {gift:.2f} ({gift_pct:+.2f}%) | S&P 500: {sp500:.2f} ({sp_pct:+.2f}%) | Nasdaq: {nasdaq:.2f} ({nas_pct:+.2f}%)<br><br><b>Conclusion:</b> {outlook}"
             return status, msg, css
+
+        # 9:00 AM to Midnight IST: Indian Markets
         else:
             nifty_val, nifty_pct = get_index_data("^NSEI")
             sensex_val, sensex_pct = get_index_data("^BSESN")
@@ -233,17 +251,17 @@ def get_macro_weather():
             ema20 = close_series.ewm(span=20, adjust=False).mean().iloc[-1]
             ema50 = close_series.ewm(span=50, adjust=False).mean().iloc[-1]
 
-            idx_str = f"NIFTY: {nifty_val:.2f} ({nifty_pct:+.0f}%) | SENSEX: {sensex_val:.2f} ({sensex_pct:+.0f}%)"
+            idx_str = f"NIFTY: {nifty_val:.2f} ({nifty_pct:+.2f}%) | SENSEX: {sensex_val:.2f} ({sensex_pct:+.2f}%)"
 
             if close > ema20:
-                return "🟢 RISK OFF", f"{idx_str}\n\nNIFTY in uptrend. Safe to deploy.", "green"
+                return "🟢 RISK OFF (BULLISH)", f"{idx_str}<br><br><b>Conclusion:</b> NIFTY is in an uptrend above the 20 EMA. Safe to deploy capital into high-probability setups.", "green"
             elif close > ema50:
-                return "🟡 CAUTION", f"{idx_str}\n\nNIFTY below 20 EMA. Cut sizes 50%.", "yellow"
+                return "🟡 CAUTION (SIDEWAYS)", f"{idx_str}<br><br><b>Conclusion:</b> NIFTY slipped below the 20 EMA but is holding the 50 EMA. Cut new position sizes by 50%.", "yellow"
             else:
-                return "🔴 RISK ON", f"{idx_str}\n\nNIFTY below 50 EMA. CASH IS KING.", "red"
-    except:
-        return "🟡 UNKNOWN", "Macro weather unavailable.", "yellow"
-
+                return "🔴 RISK ON (BEARISH)", f"{idx_str}<br><br><b>Conclusion:</b> NIFTY is below the 50 EMA indicating active downtrend. CASH IS KING. Avoid taking new long positions.", "red"
+    except Exception as e:
+        return "🟡 UNKNOWN", "Macro weather currently unavailable.", "yellow"
+        
 def style_pnl(val):
     if pd.isna(val) or isinstance(val, str): return ''
     return f"color: {'#00FF88' if val > 0 else '#FF4B4B' if val < 0 else 'white'}; font-weight: bold;"
@@ -449,12 +467,23 @@ with tabs[0]:
         else:
             top_n = 20
 
-        actionable = inst_df[
+        actionable_mask = (
             (inst_df['PROBABILITY'] >= 60) &
             (inst_df['SCORE'] >= 60) &
             (inst_df['UPSIDE_%'] >= 8) &
             (~inst_df['VERDICT'].str.contains('AVOID', na=False))
-        ].sort_values(['PROBABILITY', 'SCORE'], ascending=[False, False]).head(top_n)
+        )
+        actionable = inst_df[actionable_mask].copy()
+        
+        # Calculate expected profit first so we can sort by it
+        actionable['Est_Qty'] = (10000 / actionable['PRICE']).astype(int)
+        actionable['Est_Profit'] = (actionable['Est_Qty'] * (actionable['TARGET'] - actionable['PRICE'])).round(0)
+
+        # Apply the new 3-tier sorting: Highly recommended -> Score -> Expected Profit
+        actionable = actionable.sort_values(
+            ['PROBABILITY', 'SCORE', 'Est_Profit'], 
+            ascending=[False, False, False]
+        ).head(top_n)
 
         if not actionable.empty:
             avg_prob = actionable['PROBABILITY'].mean()
@@ -860,7 +889,7 @@ with tabs[2]:
                      'SUPPORT', 'RESISTANCE', 'REGIME']
 
         st.dataframe(
-            filtered_df[disp_cols].sort_values(['PROBABILITY', 'SCORE'], ascending=[False, False])
+            filtered_df[disp_cols].sort_values(['PROBABILITY', 'SCORE', 'UPSIDE_%'], ascending=[False, False, False])
             .style.format({'PRICE': 'Rs.{:.2f}', 'TARGET': 'Rs.{:.2f}', 'UPSIDE_%': '{:.0f}%',
                           'PROBABILITY': '{:.0f}%', 'SCORE': '{:.0f}', 'RR_RATIO': '1:{:.0f}',
                           'SUPPORT': 'Rs.{:.2f}', 'RESISTANCE': 'Rs.{:.2f}'}),

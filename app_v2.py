@@ -488,7 +488,7 @@ with tabs[2]:
     
     with st.expander("📚 Knowledge Bytes: How to Screen"):
         st.markdown("""
-        * **Strict Score & Prob:** Use the 'High Conviction' toggle to enforce Score >= 80, Prob >= 60%, and Upside > 8%.
+        * **Strict Score & Prob:** Use the 'High Conviction' toggle to enforce Score >= 90, Prob >= 60%, and Upside > 8%.
         * **Relative Strength:** Prioritize stocks showing 'Outperforming'. They move up even when Nifty drops.
         * **Avoid Weakness:** Never buy a stock if the Weekly Trend is 'Bearish', even if the daily chart looks good.
         """)
@@ -503,7 +503,7 @@ with tabs[2]:
         scr_df = df.copy()
         if search_sym: scr_df = scr_df[scr_df['SYMBOL'].isin(search_sym)]
         # STRICT RULE ENFORCEMENT
-        if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 80) & (scr_df['PROBABILITY'] >= 60) & (scr_df['UPSIDE_PCT'] > 8.0)]
+        if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 90) & (scr_df['PROBABILITY'] >= 60) & (scr_df['UPSIDE_PCT'] > 8.0)]
         if req_rs: scr_df = scr_df[scr_df['RELATIVE_STRENGTH'] == 'Outperforming']
 
         scr_df['PROBABILITY'] = scr_df['PROBABILITY'].apply(format_prob_icon)
@@ -570,7 +570,7 @@ with tabs[4]:
         penny = df[df['PRICE'] < 100].copy()
         if penny_search: penny = penny[penny['SYMBOL'].isin(penny_search)]
         # STRICT RULE ENFORCEMENT
-        if penny_top: penny = penny[(penny['SCORE'] >= 80) & (penny['PROBABILITY'] >= 60) & (penny['UPSIDE_PCT'] > 8.0)]
+        if penny_top: penny = penny[(penny['SCORE'] >= 85) & (penny['PROBABILITY'] >= 70) & (penny['UPSIDE_PCT'] > 8.0)]
 
         penny['PROBABILITY'] = penny['PROBABILITY'].apply(format_prob_icon)
         penny['SCORE'] = penny['SCORE'].apply(format_score_icon)

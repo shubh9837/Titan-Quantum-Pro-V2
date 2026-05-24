@@ -761,66 +761,72 @@ with tabs[1]:
                 </div>
                 """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.subheader("⚡ Quick Actions")
+st.markdown("---")
+        st.subheader("⚙️ Manual Portfolio Management")
 
-        col_a1, col_a2, col_a3 = st.columns(3)
+        col_a1, col_a2 = st.columns(2)
+        
         with col_a1:
-            st.markdown("#### ➕ Add New Trade")
-            with st.form("add_trade"):
-                a_sym = st.selectbox("Symbol", sorted(df['SYMBOL'].unique().tolist()) if not df.empty else [])
-                a_price = st.number_input("Buy Price", min_value=0.0, format="%.2f")
+            st.markdown("#### ➕ Add Holding")
+            with st.form("manual_add_form"):
+                a_sym = st.selectbox("Stock Symbol", sorted(df['SYMBOL'].unique().tolist()) if not df.empty else ["RELIANCE"])
                 a_qty = st.number_input("Quantity", min_value=1, step=1)
-                combo_col1, combo_col2 = st.columns(2)
-                existing_owner = combo_col1.selectbox("Portfolio", ["➕ Create New"] + sorted(all_owners))
-                new_owner = combo_col2.text_input("New Name", placeholder="e.g. Swing Fund")
+                a_price = st.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
+                
+                # Setup specific owners
+                owner_choice = st.selectbox("Portfolio Owner", ["Me", "Wife", "Joint", "Custom"])
+                custom_owner = st.text_input("If Custom, enter name:")
 
-                if st.form_submit_button("Add to Portfolio"):
-                    final_owner = new_owner.strip() if existing_owner == "➕ Create New" else existing_owner
+                if st.form_submit_button("Add to Supabase"):
+                    final_owner = custom_owner.strip() if owner_choice == "Custom" else owner_choice
                     if final_owner and a_sym:
                         live_stock = df[df['SYMBOL'] == a_sym]
                         target = float(live_stock['TARGET'].iloc[0]) if not live_stock.empty else (a_price * 1.10)
+                        
                         supabase.table('portfolio').insert({
                             "symbol": a_sym, "entry_price": a_price, "qty": int(a_qty),
                             "date": str(datetime.date.today()), "owner": final_owner,
                             "entry_target": target
                         }).execute()
-                        st.success(f"Added {a_sym}!")
+                        st.success(f"Added {a_sym} to {final_owner}'s portfolio!")
                         safe_rerun()
 
         with col_a2:
-            st.markdown("#### ➖ Register Sale")
-            sell_owner = st.selectbox("Sell From", sorted(all_owners), key="sell_owner")
-            sell_holdings = port_df[port_df['owner'] == sell_owner]['symbol'].unique().tolist() if not port_df.empty else []
-
-            with st.form("sell_trade"):
-                s_sym = st.selectbox("Stock", sell_holdings if sell_holdings else ["No Holdings"])
-                s_price = st.number_input("Sell Price", min_value=0.0, format="%.2f")
-                s_qty = st.number_input("Qty", min_value=1, step=1)
-                s_reason = st.selectbox("Reason", [
-                    "Target Hit 🎯", "Trailing SL Hit 🛡️", "Exit Engine: Scale Out ⚠️",
-                    "Exit Engine: Exit Immediate 🚨", "Momentum Exhaustion 📉",
-                    "Time Decay ⏳", "Manual Exit ✋"
+            st.markdown("#### ➖ Exit / Remove Holding")
+            with st.form("manual_remove_form"):
+                active_syms = port_df['symbol'].unique().tolist() if not port_df.empty else ["No Holdings"]
+                s_sym = st.selectbox("Select Stock to Exit", active_syms)
+                s_price = st.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
+                s_qty = st.number_input("Qty Sold", min_value=1, step=1)
+                s_reason = st.selectbox("Reason for Exit", [
+                    "Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Delete (Data Correction)"
                 ])
 
-                if st.form_submit_button("Execute Sale") and s_sym != "No Holdings":
-                    holding = port_df[(port_df['symbol'] == s_sym) & (port_df['owner'] == sell_owner)].iloc[0]
+                if st.form_submit_button("Execute Exit") and s_sym != "No Holdings":
+                    holding = port_df[port_df['symbol'] == s_sym].iloc[0]
+                    
                     if s_qty <= int(holding['qty']):
-                        supabase.table('trade_history').insert({
-                            "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(s_qty),
-                            "buy_price": float(holding['entry_price']),
-                            "realized_pl": float((s_price - holding['entry_price']) * s_qty),
-                            "pl_percentage": float(((s_price - holding['entry_price'])/holding['entry_price'])*100),
-                            "sell_date": str(datetime.date.today()), "exit_reason": s_reason, "owner": sell_owner
-                        }).execute()
+                        # Only save to history if it was a real trade, not a typo deletion
+                        if "Delete" not in s_reason:
+                            supabase.table('trade_history').insert({
+                                "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(s_qty),
+                                "buy_price": float(holding['entry_price']),
+                                "realized_pl": float((s_price - holding['entry_price']) * s_qty),
+                                "pl_percentage": float(((s_price - holding['entry_price'])/holding['entry_price'])*100),
+                                "sell_date": str(datetime.date.today()), "exit_reason": s_reason, "owner": holding['owner']
+                            }).execute()
 
+                        # Update database quantity or delete the row entirely
                         new_qty = int(holding['qty']) - int(s_qty)
                         if new_qty == 0:
                             supabase.table('portfolio').delete().eq('id', holding['id']).execute()
                         else:
                             supabase.table('portfolio').update({"qty": new_qty}).eq('id', holding['id']).execute()
-                        st.success(f"Sold {s_sym}!")
+                        
+                        st.success(f"Processed exit for {s_sym}!")
                         safe_rerun()
+                    else:
+                        st.error("You cannot sell more shares than you hold.")
 
         with col_a3:
             st.markdown("#### 📤 Bulk Actions")

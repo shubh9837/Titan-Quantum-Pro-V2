@@ -1,4 +1,9 @@
+"""
+Titan Quantum Pro V2 - Smart Agent & Chatbot
+Handles natural language commands and order screenshot OCR locally.
+"""
 import re
+import pandas as pd
 from PIL import Image, ImageEnhance, ImageOps
 import pytesseract
 
@@ -37,10 +42,15 @@ def parse_trade_text(text):
             else:
                 return {'action': 'SELL', 'qty': int(match.group(2)), 'symbol': match.group(3), 'price': float(match.group(4))}
 
-    # Standard queries
+    # Standard Market Queries
     if any(k in text for k in ['PORTFOLIO', 'HOLDINGS', 'POSITIONS']): return {'action': 'QUERY_PORTFOLIO'}
     if any(k in text for k in ['TOP PICKS', 'BEST STOCKS', 'RECOMMEND']): return {'action': 'QUERY_TOP_PICKS'}
     if any(k in text for k in ['MARKET', 'NIFTY', 'SENSEX', 'TREND']): return {'action': 'QUERY_MARKET'}
+
+    # Conversational Queries (Restored from your original code)
+    if any(k in text for k in ['HELLO', 'HI', 'HEY']): return {'action': 'GREETING'}
+    if any(k in text for k in ['THANK', 'THANKS']): return {'action': 'THANKS'}
+    if any(k in text for k in ['HELP', 'HOW']): return {'action': 'HELP'}
 
     return None
 
@@ -87,12 +97,50 @@ def parse_order_image(image_file):
         return {'error': str(e)}
 
 def get_response(parsed, portfolio_df=None, market_df=None):
-    if parsed and 'error' not in parsed:
-        if parsed['action'] == 'BUY': return f"🟢 Detected: BUY {parsed['qty']} {parsed['symbol']} @ ₹{parsed['price']}. Click confirm below."
-        elif parsed['action'] == 'SELL': return f"🔴 Detected: SELL {parsed['qty']} {parsed['symbol']} @ ₹{parsed['price']}. Go to Portfolio tab to execute."
-        elif parsed['action'] == 'SELL_ALL': return f"🔴 Exit Detected: SELL ALL {parsed['symbol']}. Go to Portfolio tab."
-        elif parsed['action'] == 'QUERY_PORTFOLIO': return "📊 Check the Portfolio Intelligence tab for your active holdings."
-        elif parsed['action'] == 'QUERY_TOP_PICKS': return "🎯 Check the Today's Top Picks tab for details."
-        elif parsed['action'] == 'QUERY_MARKET': return "📈 Check the Market Weather banner at the top of the app."
+    """
+    Generates the UI response. Uses DataFrames to give dynamic data.
+    """
+    # Robust fallback just in case app_v2 passes raw text instead of the parsed dictionary
+    if isinstance(parsed, str):
+        parsed = parse_trade_text(parsed)
+
+    if not parsed or (isinstance(parsed, dict) and 'error' in parsed):
+        err = parsed.get('error', '') if isinstance(parsed, dict) else ''
+        return f"🤔 I couldn't quite catch that. Try standard phrasing like 'Bought 50 RELIANCE at 2450' or use the manual entry tab. {err}"
+
+    action = parsed.get('action')
+
+    # Trade Commands
+    if action == 'BUY': 
+        return f"🟢 Detected: BUY {parsed['qty']} {parsed['symbol']} @ ₹{parsed['price']}. Assign an owner and click confirm below."
+    elif action == 'SELL': 
+        return f"🔴 Detected: SELL {parsed['qty']} {parsed['symbol']} @ ₹{parsed['price']}. Go to Portfolio tab to execute."
+    elif action == 'SELL_ALL': 
+        return f"🔴 Exit Detected: SELL ALL {parsed['symbol']}. Go to Portfolio tab."
+    
+    # Query Commands (Restored dynamic lookups)
+    elif action == 'QUERY_PORTFOLIO': 
+        return "📊 Check the Portfolio Intelligence tab for your active holdings."
+    elif action == 'QUERY_TOP_PICKS':
+        if market_df is not None and not market_df.empty:
+            top = market_df[(market_df['PROBABILITY'] >= 60) & (market_df['SCORE'] >= 60)].sort_values(['PROBABILITY', 'SCORE'], ascending=[False, False]).head(5)
+            if not top.empty:
+                picks = ", ".join([f"{r['SYMBOL']} ({r['PROBABILITY']:.0f}%)" for _, r in top.iterrows()])
+                return f"🎯 Today's Top Picks: {picks}. Check the Today's Top Picks tab for details."
+        return "🎯 No high-probability setups detected right now. Cash is a position."
+    elif action == 'QUERY_MARKET': 
+        return "📈 Check the Market Weather banner at the top of the app for live NIFTY/SENSEX status and regime detection."
+    
+    # Conversational Responses (Restored)
+    elif action == 'GREETING':
+        return "👋 Hello! I'm Titan Agent. I can help you analyze stocks, check your portfolio, or parse trade screenshots. What would you like to do?"
+    elif action == 'THANKS':
+        return "🙏 You're welcome! Happy trading."
+    elif action == 'HELP':
+        return ("🤖 **What I can do:**\n"
+                "1. Type trade commands: *'Bought 50 RELIANCE at 2450'*\n"
+                "2. Ask about portfolio: *'How is my portfolio?'*\n"
+                "3. Ask for picks: *'What are top picks?'*\n"
+                "4. Upload order screenshots and I'll read them\n")
     
     return "🤔 I couldn't quite catch that. Try standard phrasing like 'Bought 50 RELIANCE at 2450' or use the manual entry tab."

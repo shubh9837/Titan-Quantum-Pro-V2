@@ -416,6 +416,7 @@ with st.sidebar:
 st.markdown("<div style='text-align:center;'><h1 class='gradient-text' style='font-size: 3rem;'>Titan Quantum Pro V2</h1></div>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center; color:#A0ABBA; margin-bottom:30px; font-weight:500;'>Institutional-Grade Swing Trading Intelligence</div>", unsafe_allow_html=True)
 
+# Render Market Weather Banner
 status, msg, css_class = get_macro_weather()
 border_color = "#00FF88" if "green" in css_class else "#FF4B4B" if "red" in css_class else "#FFC107"
 bg_color = "rgba(0, 255, 136, 0.05)" if "green" in css_class else "rgba(255, 75, 75, 0.05)" if "red" in css_class else "rgba(255, 193, 7, 0.05)"

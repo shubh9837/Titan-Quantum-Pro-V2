@@ -161,12 +161,21 @@ sector_breadth_df = load_table('sector_breadth')
 port_df = load_table('portfolio')
 hist_df = load_table('trade_history')
 
-# Standardize Owners
-if not port_df.empty: port_df['owner'] = port_df['owner'].fillna("Main")
-if not hist_df.empty: hist_df['owner'] = hist_df['owner'].fillna("Main")
+# Standardize Owners Safely
+p_owners = []
+if not port_df.empty:
+    if 'owner' not in port_df.columns: port_df['owner'] = "Main"
+    port_df['owner'] = port_df['owner'].fillna("Main")
+    p_owners = port_df['owner'].tolist()
 
-db_owners = list(set(port_df['owner'].tolist() + hist_df['owner'].tolist())) if not port_df.empty or not hist_df.empty else ["Main"]
-db_owners = sorted([o for o in db_owners if pd.notna(o)])
+h_owners = []
+if not hist_df.empty:
+    if 'owner' not in hist_df.columns: hist_df['owner'] = "Main"
+    hist_df['owner'] = hist_df['owner'].fillna("Main")
+    h_owners = hist_df['owner'].tolist()
+
+db_owners = list(set(p_owners + h_owners))
+db_owners = sorted([o for o in db_owners if pd.notna(o)]) if db_owners else ["Main"]
 
 # ===================== SIDEBAR =====================
 with st.sidebar:

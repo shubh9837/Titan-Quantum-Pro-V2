@@ -60,6 +60,13 @@ def init_connection():
 supabase = init_connection()
 engine = ProbabilityEngine()
 
+def get_base_verdict(score):
+    if score >= 90: return "💎 ALPHA"
+    if score >= 75: return "🟢 STRONG BUY"
+    if score >= 60: return "🟢 BUY"
+    if score >= 45: return "🟡 WATCH"
+    return "🔴 AVOID"
+
 @st.cache_data(ttl=120)
 def load_market_data():
     all_data, limit, offset = [], 1000, 0
@@ -72,10 +79,14 @@ def load_market_data():
     df = pd.DataFrame(all_data)
     if df.empty: return df
     
-    # Ensure numerical formatting
     num_cols = ['PRICE', 'SCORE', 'PROBABILITY', 'TARGET', 'STOP_LOSS', 'RR_RATIO', 'UPSIDE_PCT', 'TURNOVER_CR', 'RVOL', 'SUPPORT', 'RESISTANCE']
     for col in num_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+    # Clean the verdict to bypass the aggressive Earnings flag for the UI tables
+    if 'SCORE' in df.columns:
+        df['CLEAN_VERDICT'] = df['SCORE'].apply(get_base_verdict)
+    
     return df
 
 @st.cache_data(ttl=300)
@@ -83,46 +94,15 @@ def load_table(table_name):
     try: return pd.DataFrame(supabase.table(table_name).select("*").execute().data)
     except: return pd.DataFrame()
 
-# ===================== KNOWLEDGE BASE DICTIONARY (RESTORED) =====================
+# ===================== KNOWLEDGE BASE (RESTORED) =====================
 KNOWLEDGE = {
-    "score": """
-    #### 📊 What is Confluence Score (0-100)?
-    The score combines technical factors. **Trend Alignment (Max +30):** Price > 20 EMA > 50 EMA. **Momentum (Max +15):** RSI between 55 and 75. **Volume Signature (Max +10):** RVOL > 1.5x. **Relative Strength (Max +15):** Outperforming NIFTY 50.
-    *Veto Penalty:* If the Weekly Trend is broken, the score drops drastically (-30).
-    """,
-    "probability": """
-    #### 🎯 What is Win Probability %?
-    Bayesian probability calculated from: Base Rate (historical accuracy of similar scores) x User History Calibration.
-    If the Probability is 75%, it means historically, 3 out of 4 setups with this identical score hit their target before hitting their stop loss.
-    """,
-    "damage": """
-    #### 💀 What is Damage Score (0-100)?
-    Measures how badly a holding is deteriorating:
-    **0-30:** Normal pullback, HOLD
-    **31-55:** Risk rising, TIGHTEN STOP
-    **56-80:** Structure damaged, SCALE OUT 50%
-    **81-100:** Trend broken, EXIT IMMEDIATE
-    """,
-    "rvol": """
-    #### 📈 What is RVOL & Turnover?
-    **RVOL (Relative Volume):** Current volume / 20-day average volume. RVOL > 1.5x means unusual activity.
-    **Turnover (Liquidity):** Daily traded value in Crores. Always avoid stocks under 5 Cr to prevent massive slippage.
-    """,
-    "rr": """
-    #### ⚖️ What is Risk:Reward Ratio?
-    Potential reward / Potential risk. A 1:2 ratio means you risk Rs.1 to make Rs.2.
-    We target minimum 1:1.5 for swing trades. Higher is better.
-    """,
-    "pattern": """
-    #### 🕯️ Chart Patterns & S&R
-    **Volume Profile Resistance:** Unlike simple candlestick wicks, V2.1 calculates resistance based on the price level where the maximum historical volume was traded (Point of Control). Breakouts past these nodes are extremely powerful.
-    """,
-    "regime": """
-    #### 🌍 Market Regime Guide
-    **Strong Bull:** Nifty Uptrend above 20 EMA. Deploy full capital.
-    **Sideways / Caution:** Below 20 EMA but holding 50 EMA. Cut position sizes.
-    **Bearish:** Below 50 EMA. Only short or cash. Cash is a position.
-    """
+    "score": "#### 📊 Confluence Score (0-100)\nCombines technical factors. **Trend (Max +30):** Price > 20 EMA > 50 EMA. **Momentum (Max +15):** RSI between 55-75. **Volume (Max +10):** RVOL > 1.5x. **RS (Max +15):** Outperforming NIFTY 50.\n*Veto Penalty:* Weekly Trend breakdown removes 30 pts.",
+    "probability": "#### 🎯 Win Probability %\nBayesian probability calculated from historical base rates calibrated with your personal win rate. 75% means historically 3 out of 4 setups with this score hit their target.",
+    "damage": "#### 💀 Damage Score (0-100)\nMeasures deterioration: **0-30:** Normal pullback. **31-55:** TIGHTEN STOP. **56-80:** SCALE OUT 50%. **81-100:** EXIT IMMEDIATE.",
+    "rvol": "#### 📈 RVOL & Turnover\n**RVOL:** Current volume / 20-day average. **Turnover:** Daily traded value in Crores. Avoid stocks under 5 Cr.",
+    "rr": "#### ⚖️ Risk:Reward Ratio\nPotential reward / risk. 1:2 means risking Rs.1 to make Rs.2. Target minimum 1:1.5.",
+    "pattern": "#### 🕯️ Volume Profile S&R\nV2.1 calculates resistance based on the Point of Control (where max volume traded), not just random wicks.",
+    "regime": "#### 🌍 Market Regime\n**Strong Bull:** Nifty > 20 EMA. **Caution:** Below 20 EMA but > 50 EMA. **Bearish:** Below 50 EMA. Cash is a position."
 }
 
 # ===================== HELPERS & CHARTING =====================
@@ -185,7 +165,6 @@ def get_macro_weather():
             else: return "🐻 RISK OFF (BEARISH)", f"{idx_str} | Active downtrend. CASH IS KING.", "red"
     except: return "📡 UNKNOWN", "Macro weather currently unavailable.", "gray"
 
-# Differentiating Score vs Probability Icons
 def format_score_icon(val):
     if val >= 75: return f"🌟 {val:.0f}"
     elif val >= 60: return f"⭐ {val:.0f}"
@@ -252,8 +231,9 @@ with st.sidebar:
         res = st.session_state['agent_result']
         st.success(f"Detected: BUY {res['qty']} {res['symbol']} @ ₹{res['price']}")
         
-        a_own = st.selectbox("Assign Owner", db_owners + ["+ Add New Portfolio"])
-        f_own = st.text_input("New Name:") if a_own == "+ Add New Portfolio" else a_own
+        a_own = st.selectbox("Assign Owner", db_owners)
+        new_own = st.text_input("OR Create New Owner:")
+        f_own = new_own.strip() if new_own.strip() else a_own
             
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
@@ -265,10 +245,6 @@ with st.sidebar:
                 del st.session_state['agent_result']
                 st.cache_data.clear()
                 safe_rerun()
-
-    st.markdown("---")
-    st.markdown("### 🛡️ Risk Settings")
-    max_dd = st.slider("Max Portfolio DD %", 5, 30, 15)
 
 # ===================== HEADER =====================
 st.markdown("<div style='text-align:center;'><h1 class='gradient-text' style='font-size: 3rem;'>Titan Quantum Pro V2.1</h1></div>", unsafe_allow_html=True)
@@ -303,11 +279,11 @@ with tabs[0]:
 
     if not df.empty:
         inst_df = df[df['TURNOVER_CR'] >= 5.0].copy() 
-        actionable = inst_df[(inst_df['PROBABILITY'] >= 60) & (inst_df['SCORE'] >= 60) & (~inst_df['VERDICT'].str.contains('AVOID', na=False))].copy()
+        actionable = inst_df[(inst_df['PROBABILITY'] >= 60) & (inst_df['SCORE'] >= 60) & (~inst_df['CLEAN_VERDICT'].str.contains('AVOID', na=False))].copy()
         
         if not actionable.empty:
             actionable['Est_Qty'] = (10000 / actionable['PRICE']).astype(int)
-            actionable = actionable.sort_values(['PROBABILITY', 'SCORE', 'UPSIDE_PCT'], ascending=[False, False, False]).head(10)
+            actionable = actionable.sort_values(['SCORE', 'PROBABILITY', 'UPSIDE_PCT'], ascending=[False, False, False]).head(10)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("📊 Avg Probability", f"{actionable['PROBABILITY'].mean():.0f}%")
@@ -315,14 +291,14 @@ with tabs[0]:
             c3.metric("⚖️ Avg R:R", f"1:{actionable['RR_RATIO'].mean():.1f}")
             c4.metric("🔥 Top Picks (Liquid)", f"{len(actionable)}")
 
-            display_df = actionable[['SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'PROBABILITY', 'SCORE', 'RR_RATIO', 'STOP_LOSS', 'RELATIVE_STRENGTH', 'EARNINGS_RISK']].copy()
+            display_df = actionable[['CLEAN_VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'EST_PERIOD', 'RELATIVE_STRENGTH', 'EARNINGS_RISK']].copy()
             display_df['PROBABILITY'] = display_df['PROBABILITY'].apply(format_prob_icon)
             display_df['SCORE'] = display_df['SCORE'].apply(format_score_icon)
             display_df['RELATIVE_STRENGTH'] = display_df['RELATIVE_STRENGTH'].apply(lambda x: "🔥 Outperforming" if "Outperform" in x else "Neutral")
             display_df['EARNINGS_RISK'] = display_df['EARNINGS_RISK'].apply(lambda x: "⚠️ YES" if x == "YES" else "No")
             
             st.dataframe(
-                display_df.style.format({'PRICE': 'Rs.{:.2f}', 'TARGET': 'Rs.{:.2f}', 'UPSIDE_PCT': '{:.0f}%', 'RR_RATIO': '1:{:.1f}', 'STOP_LOSS': 'Rs.{:.2f}'}),
+                display_df.rename(columns={'CLEAN_VERDICT': 'Verdict'}).style.format({'PRICE': 'Rs.{:.2f}', 'TARGET': 'Rs.{:.2f}', 'UPSIDE_PCT': '{:.0f}%'}),
                 use_container_width=True, hide_index=True
             )
 
@@ -340,9 +316,9 @@ with tabs[0]:
                         <div><div style='font-size:13px; color:#A0ABBA;'>Win Prob</div><div style='font-size:22px; font-weight:bold; color:{prob_color};'>{g['PROBABILITY']:.0f}%</div></div>
                         <div><div style='font-size:13px; color:#A0ABBA;'>CMP</div><div style='font-size:20px; color:#E0E6ED;'>Rs.{g['PRICE']:.2f}</div></div>
                         <div><div style='font-size:13px; color:#A0ABBA;'>Target (Vol Profile)</div><div style='font-size:20px; color:#00FF88;'>Rs.{g['TARGET']:.2f} <span style='font-size:14px;'>(+{g['UPSIDE_PCT']:.0f}%)</span></div></div>
-                        <div><div style='font-size:13px; color:#A0ABBA;'>Stop Loss</div><div style='font-size:20px; color:#FF4B4B;'>Rs.{g['STOP_LOSS']:.2f}</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Trailing SL</div><div style='font-size:20px; color:#FF4B4B;'>Rs.{g['STOP_LOSS']:.2f}</div></div>
                         <div><div style='font-size:13px; color:#A0ABBA;'>R:R</div><div style='font-size:20px; color:#E0E6ED;'>1:{g['RR_RATIO']:.1f}</div></div>
-                        <div><div style='font-size:13px; color:#A0ABBA;'>Hold</div><div style='font-size:20px; color:#E0E6ED;'>{g['EST_PERIOD']}</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Expected Time</div><div style='font-size:20px; color:#E0E6ED;'>{g['EST_PERIOD']}</div></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -353,12 +329,14 @@ with tabs[0]:
                     with col1:
                         st.info(f"💡 Suggestion: **{g['Est_Qty']}** shares (₹10k)")
                     with col2:
-                        sel = st.selectbox("Assign Owner", db_owners + ["+ Add New"], key=f"sel_{idx}")
-                        f_own = st.text_input("New Name:", key=f"fown_{idx}") if sel == "+ Add New" else sel
-                        if st.button(f"➕ Quick Add", key=f"add_{idx}"):
-                            if f_own:
-                                supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": f_own}).execute()
-                                st.success("Added!")
+                        sel = st.selectbox("Select Existing Owner", db_owners, key=f"sel_{idx}")
+                        f_own_input = st.text_input("OR Create New Owner:", key=f"fown_{idx}") 
+                        final_own = f_own_input.strip() if f_own_input.strip() else sel
+                        
+                        if st.button(f"➕ Quick Add to Portfolio", key=f"add_{idx}"):
+                            if final_own:
+                                supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": final_own}).execute()
+                                st.success(f"Added to {final_own}'s ledger!")
                                 st.cache_data.clear()
                                 safe_rerun()
         else: st.info("🟡 No safe setups matching your strategy criteria. Cash is a position.")
@@ -370,7 +348,6 @@ with tabs[1]:
     active_port = port_df[port_df['owner'] == view_owner] if not port_df.empty else pd.DataFrame()
 
     if not active_port.empty:
-        # Crash-Proof Dictionary Fetcher
         @st.cache_data(ttl=300)
         def fetch_safe_portfolio_history(symbols):
             h_dict = {}
@@ -387,13 +364,18 @@ with tabs[1]:
             live = df[df['SYMBOL'] == sym].iloc[0] if not df.empty and sym in df['SYMBOL'].values else None
             cmp = float(live['PRICE']) if live is not None else float(row['entry_price'])
             entry, qty = float(row['entry_price']), int(row['qty'])
+            sector = str(live['SECTOR']) if live is not None else "Unknown"
             
+            try: days_held = (datetime.date.today() - pd.to_datetime(row.get('date', datetime.date.today())).date()).days
+            except: days_held = 0
+
             hist_data = bulk_hist.get(sym, pd.DataFrame()).copy()
             hist_data.dropna(inplace=True)
 
             dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
             total_dmg += dmg
             
+            locked_target = float(live['TARGET']) if live is not None else entry * 1.15
             pnl_pct = ((cmp - entry) / entry) * 100
             val = cmp * qty
             
@@ -402,25 +384,42 @@ with tabs[1]:
             elif cmp <= stop * 1.02: sl_proximity = "⚠️ NEAR"
 
             port_calc.append({
-                "symbol": sym, "qty": qty, "entry": entry, "cmp": cmp, "pnl_pct": pnl_pct, "profit": qty * (cmp - entry),
-                "invested": entry * qty, "val": val, "stop": stop, "proximity": sl_proximity, "damage": dmg, "verdict": get_exit_badge(verdict)
+                "symbol": sym, "sector": sector, "qty": qty, "entry": entry, "cmp": cmp, "pnl_pct": pnl_pct, "profit": qty * (cmp - entry),
+                "invested": entry * qty, "val": val, "stop": stop, "locked_target": locked_target, "days_held": days_held, "proximity": sl_proximity, "damage": dmg, "verdict": get_exit_badge(verdict)
             })
 
         pdf = pd.DataFrame(port_calc)
         t_inv, t_cur = pdf['invested'].sum(), pdf['val'].sum()
         
+        # Portfolio Summary Metrics
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("💰 Invested", f"Rs.{t_inv:,.2f}")
+        c1.metric("💰 Total Invested", f"Rs.{t_inv:,.2f}")
         c2.metric("📈 Current Value", f"Rs.{t_cur:,.2f}", f"Rs.{t_cur - t_inv:,.2f}")
         c3.metric("🎯 Net P&L %", f"{(t_cur - t_inv) / t_inv * 100:.2f}%" if t_inv > 0 else "0%")
-        c4.metric("⚠️ Avg Damage", f"{total_dmg / len(pdf):.0f}/100", delta_color="inverse")
+        c4.metric("⚠️ Avg Damage Score", f"{total_dmg / len(pdf):.0f}/100", delta_color="inverse")
+
+        # Pie Charts for Portfolio Allocation
+        st.markdown("##### 🥧 Allocation Breakdown")
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4)
+            fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
+            st.plotly_chart(fig_sym, use_container_width=True)
+        with pc2:
+            fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4)
+            fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
+            st.plotly_chart(fig_sec, use_container_width=True)
 
         st.markdown("##### 📊 Active Holdings")
         def color_pnl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B' if val < 0 else 'white'}; font-weight: bold;"
+        
+        # Clean rename for headers
+        display_pdf = pdf[['verdict', 'damage', 'symbol', 'qty', 'entry', 'cmp', 'pnl_pct', 'profit', 'locked_target', 'stop', 'proximity', 'days_held']].rename(
+            columns={'verdict': 'Action', 'damage': 'Damage', 'symbol': 'Stock', 'qty': 'Qty', 'entry': 'Entry (₹)', 'cmp': 'CMP (₹)', 'pnl_pct': 'P&L (%)', 'profit': 'P&L (₹)', 'locked_target': 'Target (₹)', 'stop': 'Trail SL (₹)', 'proximity': 'SL Alert', 'days_held': 'Days Held'}
+        )
+        
         st.dataframe(
-            pdf[['verdict', 'damage', 'symbol', 'qty', 'entry', 'cmp', 'pnl_pct', 'profit', 'stop', 'proximity']].style
-            .format({"entry": "Rs.{:.2f}", "cmp": "Rs.{:.2f}", "pnl_pct": "{:.2f}%", "profit": "Rs.{:.2f}", "stop": "Rs.{:.2f}", "damage": "{:.0f}"})
-            .map(color_pnl, subset=['pnl_pct', 'profit']),
+            display_pdf.style.format({"Entry (₹)": "{:.2f}", "CMP (₹)": "{:.2f}", "P&L (%)": "{:.2f}%", "P&L (₹)": "{:.2f}", "Target (₹)": "{:.2f}", "Trail SL (₹)": "{:.2f}", "Damage": "{:.0f}"}).map(color_pnl, subset=['P&L (%)', 'P&L (₹)']),
             use_container_width=True, hide_index=True
         )
 
@@ -428,7 +427,22 @@ with tabs[1]:
         st.subheader("🔍 Detailed Chart View")
         selected_stock = st.selectbox("Select holding to analyze:", ["-- Select --"] + sorted(pdf['symbol'].tolist()))
         if selected_stock != "-- Select --":
-            with st.expander(f"View Chart for {selected_stock}", expanded=True):
+            g = pdf[pdf['symbol'] == selected_stock].iloc[0]
+            prob_color = "#00FF88" if g['pnl_pct'] > 0 else "#FF4B4B"
+            
+            with st.expander(f"View Deep Dive for {selected_stock}", expanded=True):
+                st.markdown(f"""
+                <div style='background:#141824; padding:20px; border-radius:12px; margin-bottom:10px; border-left:5px solid {prob_color};'>
+                    <h3 style='margin:0; color:#E0E6ED;'>{g['symbol']}</h3>
+                    <div style='display:flex; flex-wrap:wrap; gap:25px; margin-top:15px;'>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>P&L %</div><div style='font-size:22px; font-weight:bold; color:{prob_color};'>{g['pnl_pct']:+.2f}%</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Damage Score</div><div style='font-size:20px; color:#FFC107;'>{g['damage']:.0f}/100</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Target</div><div style='font-size:20px; color:#00FF88;'>Rs.{g['locked_target']:.2f}</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Trailing SL</div><div style='font-size:20px; color:#FF4B4B;'>Rs.{g['stop']:.2f}</div></div>
+                        <div><div style='font-size:13px; color:#A0ABBA;'>Days Held</div><div style='font-size:20px; color:#E0E6ED;'>{g['days_held']}</div></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 render_interactive_chart(selected_stock, f"portfolio_{selected_stock}")
 
     else: st.info(f"No active holdings for {view_owner}.")
@@ -445,18 +459,20 @@ with tabs[1]:
                 a_qty = c2.number_input("Quantity", min_value=1, step=1)
                 a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
                 
-                a_own = c2.selectbox("Owner", db_owners + ["+ Add New Portfolio"])
-                f_own = st.text_input("New Name:") if a_own == "+ Add New Portfolio" else a_own
+                a_own = c2.selectbox("Select Existing Owner", db_owners)
+                a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
                 
                 if st.form_submit_button("Add to Database"):
+                    f_own = a_new.strip() if a_new.strip() else a_own
                     if f_own and a_sym:
                         supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
-                        st.success("Holding Added!")
+                        st.success(f"Holding Added to {f_own}!")
                         st.cache_data.clear()
                         safe_rerun()
 
         elif action == "➖ Exit Holding":
             with st.form("exit_form"):
+                st.info(f"💡 You are clearing stocks from **{view_owner}'s** portfolio.")
                 if not active_port.empty:
                     s_sym = st.selectbox("Stock to Exit", active_port['symbol'].unique())
                     holding = active_port[active_port['symbol'] == s_sym].iloc[0] if s_sym else None
@@ -485,36 +501,47 @@ with tabs[1]:
 
 # --- TAB 2: MARKET SCREENER ---
 with tabs[2]:
-    if not df.empty and not sector_breadth_df.empty:
-        st.subheader("🌍 Sector Heatmap (Live)")
-        fig = px.treemap(sector_breadth_df, path=[px.Constant("Indian Market"), 'SECTOR'], values='TOTAL_STOCKS', color='BREADTH_PCT',
-                         color_continuous_scale=['#FF4B4B', '#0B0E14', '#00FF88'], color_continuous_midpoint=50,
-                         custom_data=['BREADTH_PCT', 'AVG_SCORE', 'BULLISH_STOCKS', 'TOTAL_STOCKS'])
-        fig.update_traces(hovertemplate="<b>%{label}</b><br>Breadth: %{customdata[0]:.0f}%<br>Bullish: %{customdata[2]}/%{customdata[3]}<br>Avg Score: %{customdata[1]:.0f}")
-        fig.update_layout(margin=dict(t=10,l=0,r=0,b=0), height=400, template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown("---")
-        st.subheader("📋 Advanced Screener")
-        c1, c2, c3, c4 = st.columns(4)
-        min_s = c1.slider("Min Score", 0, 100, 50)
-        min_p = c2.slider("Min Prob %", 0, 100, 50)
-        req_rs = c3.checkbox("🔥 Only Nifty Outperformers")
-        req_wt = c4.checkbox("🛡️ No Weekly Downtrends", value=True)
-
-        scr_df = df[(df['SCORE'] >= min_s) & (df['PROBABILITY'] >= min_p)].copy()
+    st.subheader("📋 Advanced Screener")
+    
+    with st.expander("📚 Knowledge Bytes: How to Screen"):
+        st.markdown("""
+        * **Score > 60 & Prob > 60%:** The sweet spot for high-probability swing trades.
+        * **Relative Strength:** Prioritize stocks showing 'Outperforming'. They move up even when Nifty drops.
+        * **Avoid Weakness:** Never buy a stock if the Weekly Trend is 'Bearish', even if the daily chart looks good.
+        """)
+        
+    c1, c2, c3 = st.columns([2, 1, 1])
+    search_sym = c1.multiselect("🔍 Search Stocks (Leave blank for all)", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
+    show_top = c2.toggle("🔥 High Conviction Only (Score > 60)")
+    req_rs = c3.checkbox("👑 Only Nifty Outperformers")
+    
+    if not df.empty:
+        scr_df = df.copy()
+        if search_sym: scr_df = scr_df[scr_df['SYMBOL'].isin(search_sym)]
+        if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 60) & (scr_df['PROBABILITY'] >= 60)]
         if req_rs: scr_df = scr_df[scr_df['RELATIVE_STRENGTH'] == 'Outperforming']
-        if req_wt: scr_df = scr_df[scr_df['WEEKLY_TREND'] != 'Bearish']
 
         scr_df['PROBABILITY'] = scr_df['PROBABILITY'].apply(format_prob_icon)
         scr_df['SCORE'] = scr_df['SCORE'].apply(format_score_icon)
 
+        # Strict Sorting: Score -> Probability -> Upside
         st.dataframe(
-            scr_df[['VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'SECTOR', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'RELATIVE_STRENGTH', 'TURNOVER_CR']]
-            .sort_values('UPSIDE_PCT', ascending=False)
+            scr_df[['CLEAN_VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'SECTOR', 'EST_PERIOD', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'RELATIVE_STRENGTH', 'TURNOVER_CR']]
+            .sort_values(['SCORE', 'PROBABILITY', 'UPSIDE_PCT'], ascending=[False, False, False])
+            .rename(columns={'CLEAN_VERDICT': 'Verdict', 'EST_PERIOD': 'Expected Time'})
             .style.format({'PRICE': 'Rs.{:.2f}', 'TARGET': 'Rs.{:.2f}', 'UPSIDE_PCT': '{:.0f}%', 'TURNOVER_CR': '{:.1f} Cr'}),
             use_container_width=True, hide_index=True
         )
+
+        st.markdown("---")
+        if not sector_breadth_df.empty:
+            st.subheader("🌍 Sector Heatmap (Live)")
+            fig = px.treemap(sector_breadth_df, path=[px.Constant("Indian Market"), 'SECTOR'], values='TOTAL_STOCKS', color='BREADTH_PCT',
+                             color_continuous_scale=['#FF4B4B', '#0B0E14', '#00FF88'], color_continuous_midpoint=50,
+                             custom_data=['BREADTH_PCT', 'AVG_SCORE', 'BULLISH_STOCKS', 'TOTAL_STOCKS'])
+            fig.update_traces(hovertemplate="<b>%{label}</b><br>Breadth: %{customdata[0]:.0f}%<br>Bullish: %{customdata[2]}/%{customdata[3]}<br>Avg Score: %{customdata[1]:.0f}")
+            fig.update_layout(margin=dict(t=10,l=0,r=0,b=0), height=400, template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
     else: st.error("No data available. Run master scan.")
 
 # --- TAB 3: BREAKOUT RADAR ---
@@ -524,17 +551,20 @@ with tabs[3]:
     if not df.empty:
         brk = df[(df['SCORE'] >= 50) & (df['PRICE'] < df['RESISTANCE']) & (df['TURNOVER_CR'] > 5.0)].copy()
         brk['DIST'] = ((brk['RESISTANCE'] - brk['PRICE']) / brk['PRICE']) * 100
-        brk = brk[(brk['DIST'] >= 0.5) & (brk['DIST'] <= 3.5)].sort_values('DIST')
+        brk = brk[(brk['DIST'] >= 0.5) & (brk['DIST'] <= 3.5)].sort_values(['SCORE', 'PROBABILITY'], ascending=[False, False])
         
         for _, b in brk.head(5).iterrows():
             col_info, col_chart = st.columns([1, 1.5])
             with col_info:
+                prob_color = "#00FF88" if b['PROBABILITY'] >= 75 else "#FFC107" if b['PROBABILITY'] >= 60 else "#FF4B4B"
                 st.markdown(f"""
                 <div style='background:#141824; padding:20px; border-radius:12px; border-left:5px solid #00B8FF; margin-bottom:10px;'>
                     <h3 style='margin:0; color:#E0E6ED;'>{b['SYMBOL']}</h3>
-                    <div style='color:#00B8FF; font-weight:800; margin-top:5px;'>Proximity: {b['DIST']:.1f}%</div>
-                    <div style='margin-top:12px; color:#A0ABBA;'>CMP: Rs.{b['PRICE']:.2f}</div>
-                    <div style='color:#A0ABBA;'>Resistance Node: Rs.{b['RESISTANCE']:.2f}</div>
+                    <div style='color:#00B8FF; font-weight:800; margin-top:5px; font-size:18px;'>Proximity: {b['DIST']:.1f}%</div>
+                    <div style='margin-top:12px; color:#A0ABBA;'><b>Score:</b> {b['SCORE']:.0f}/100</div>
+                    <div style='color:#A0ABBA;'><b>Win Prob:</b> <span style='color:{prob_color}'>{b['PROBABILITY']:.0f}%</span></div>
+                    <div style='color:#A0ABBA;'><b>Target:</b> Rs.{b['TARGET']:.2f} (+{b['UPSIDE_PCT']:.0f}%)</div>
+                    <div style='color:#A0ABBA;'><b>Est. Time:</b> {b['EST_PERIOD']}</div>
                 </div>
                 """, unsafe_allow_html=True)
             with col_chart:
@@ -546,14 +576,23 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("🎰 High-Risk Sandbox (< ₹100)")
     if not df.empty:
-        penny = df[df['PRICE'] < 100].copy()
         st.warning("⚠️ High Volatility. Strict Stop Losses Mandatory. Pay attention to the Turnover (Liquidity) column to avoid slippage.")
         
+        c1, c2 = st.columns([2, 1])
+        penny_search = c1.multiselect("🔍 Search Penny Stocks", sorted(df[df['PRICE'] < 100]['SYMBOL'].dropna().unique()))
+        penny_top = c2.toggle("🔥 High Conviction Only (Penny)")
+
+        penny = df[df['PRICE'] < 100].copy()
+        if penny_search: penny = penny[penny['SYMBOL'].isin(penny_search)]
+        if penny_top: penny = penny[(penny['SCORE'] >= 50) & (penny['PROBABILITY'] >= 50)]
+
         penny['PROBABILITY'] = penny['PROBABILITY'].apply(format_prob_icon)
         penny['SCORE'] = penny['SCORE'].apply(format_score_icon)
+        
         st.dataframe(
-            penny[['VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'TURNOVER_CR']]
-            .sort_values('UPSIDE_PCT', ascending=False)
+            penny[['CLEAN_VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'EST_PERIOD', 'TURNOVER_CR']]
+            .sort_values(['SCORE', 'PROBABILITY', 'UPSIDE_PCT'], ascending=[False, False, False])
+            .rename(columns={'CLEAN_VERDICT': 'Verdict', 'EST_PERIOD': 'Expected Time'})
             .style.format({'PRICE': 'Rs.{:.2f}', 'TARGET': 'Rs.{:.2f}', 'UPSIDE_PCT': '{:.0f}%', 'TURNOVER_CR': '{:.2f} Cr'}),
             use_container_width=True, hide_index=True
         )
@@ -572,7 +611,7 @@ with tabs[5]:
         c1, c2, c3 = st.columns(3)
         c1.metric("💰 Total Realized P&L", f"Rs.{h_data['realized_pl'].sum():,.2f}")
         c2.metric("🏆 Win Rate", f"{(len(h_data[h_data['realized_pl'] > 0]) / len(h_data) * 100):.1f}%")
-        c3.metric("🎯 Best Trade", f"{h_data.loc[h_data['realized_pl'].idxmax()]['symbol']} ({h_data['realized_pl'].max():.0f})")
+        c3.metric("🎯 Best Trade", f"{h_data.loc[h_data['realized_pl'].idxmax()]['symbol']} (Rs.{h_data['realized_pl'].max():.0f})")
 
         def style_pl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B'}; font-weight: bold;"
         
@@ -584,22 +623,14 @@ with tabs[5]:
         )
     else: st.info("No trade history logged.")
 
-# --- TAB 6: KNOWLEDGE HUB (FULLY RESTORED & UPDATED) ---
+# --- TAB 6: KNOWLEDGE HUB ---
 with tabs[6]:
     st.subheader("📚 Trading Knowledge Hub")
     st.caption("Understand every metric and signal in the V2.1 app")
 
-    topic = st.selectbox("Select Topic:", [
-        "Confluence Score", "Win Probability", "Exit Damage Score", "RVOL (Volume)",
-        "Risk:Reward Ratio", "Chart Patterns", "Market Regime"
-    ])
+    topic = st.selectbox("Select Topic:", ["Confluence Score", "Win Probability", "Exit Damage Score", "RVOL (Volume)", "Risk:Reward Ratio", "Chart Patterns", "Market Regime"])
 
-    topic_map = {
-        "Confluence Score": "score", "Win Probability": "probability",
-        "Exit Damage Score": "damage", "RVOL (Volume)": "rvol",
-        "Risk:Reward Ratio": "rr", "Chart Patterns": "pattern",
-        "Market Regime": "regime"
-    }
+    topic_map = {"Confluence Score": "score", "Win Probability": "probability", "Exit Damage Score": "damage", "RVOL (Volume)": "rvol", "Risk:Reward Ratio": "rr", "Chart Patterns": "pattern", "Market Regime": "regime"}
 
     if topic in topic_map:
         st.markdown(f"<div style='background:#141824; padding:20px; border-radius:12px; border:1px solid #2A3143;'>", unsafe_allow_html=True)

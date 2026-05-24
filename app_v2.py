@@ -11,9 +11,7 @@ from probability_core import ProbabilityEngine
 from titan_agent import parse_trade_text, parse_order_image, get_response
 import pandas_ta_classic as ta
 
-# Pandas 2.0+ compatibility patch
-if not hasattr(pd.Series, "append"):
-    pd.Series.append = pd.Series._append
+if not hasattr(pd.Series, "append"): pd.Series.append = pd.Series._append
 
 def safe_rerun():
     try: st.rerun()
@@ -21,7 +19,6 @@ def safe_rerun():
         try: st.experimental_rerun()
         except: pass
 
-# Set timezone explicitly to IST
 IST = pytz.timezone('Asia/Kolkata')
 def get_ist_now(): return datetime.datetime.now(IST)
 
@@ -38,12 +35,10 @@ st.markdown("""
     }
     .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 184, 255, 0.4); }
     div[data-testid="metric-container"] {
-        background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; 
-        padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
     }
     .streamlit-expanderHeader { background-color: #141824; border-radius: 8px; }
     .stDataFrame { border-radius: 10px; overflow: hidden; }
-    div[data-testid="stMarkdownContainer"] p { font-size: 15px; line-height: 1.6; }
     .gradient-text {
         background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
@@ -54,9 +49,7 @@ st.markdown("""
 
 # ===================== INIT & DATABASE =====================
 @st.cache_resource
-def init_connection():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-
+def init_connection(): return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 supabase = init_connection()
 engine = ProbabilityEngine()
 
@@ -83,10 +76,7 @@ def load_market_data():
     for col in num_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-    # Clean the verdict to bypass the aggressive Earnings flag for the UI tables
-    if 'SCORE' in df.columns:
-        df['CLEAN_VERDICT'] = df['SCORE'].apply(get_base_verdict)
-    
+    if 'SCORE' in df.columns: df['CLEAN_VERDICT'] = df['SCORE'].apply(get_base_verdict)
     return df
 
 @st.cache_data(ttl=300)
@@ -94,7 +84,7 @@ def load_table(table_name):
     try: return pd.DataFrame(supabase.table(table_name).select("*").execute().data)
     except: return pd.DataFrame()
 
-# ===================== KNOWLEDGE BASE (RESTORED) =====================
+# ===================== KNOWLEDGE BASE =====================
 KNOWLEDGE = {
     "score": "#### 📊 Confluence Score (0-100)\nCombines technical factors. **Trend (Max +30):** Price > 20 EMA > 50 EMA. **Momentum (Max +15):** RSI between 55-75. **Volume (Max +10):** RVOL > 1.5x. **RS (Max +15):** Outperforming NIFTY 50.\n*Veto Penalty:* Weekly Trend breakdown removes 30 pts.",
     "probability": "#### 🎯 Win Probability %\nBayesian probability calculated from historical base rates calibrated with your personal win rate. 75% means historically 3 out of 4 setups with this score hit their target.",
@@ -133,9 +123,7 @@ def render_interactive_chart(symbol, unique_key_suffix=""):
         fig = go.Figure(data=[go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name='Price', increasing_line_color='#00FF88', decreasing_line_color='#FF4B4B')])
         fig.add_trace(go.Scatter(x=data.index, y=data['EMA20'], line=dict(color='#00B8FF', width=1.5), name='20 EMA'))
         fig.add_trace(go.Scatter(x=data.index, y=data['EMA50'], line=dict(color='#FFC107', width=1.5), name='50 EMA'))
-        fig.update_layout(title=dict(text=f"{symbol} - Live Technicals", font=dict(color='#E0E6ED')),
-                          template='plotly_dark', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                          height=400, margin=dict(l=0, r=0, t=40, b=0), xaxis_rangeslider_visible=False)
+        fig.update_layout(title=dict(text=f"{symbol} - Live Technicals", font=dict(color='#E0E6ED')), template='plotly_dark', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=400, margin=dict(l=0, r=0, t=40, b=0), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{unique_key_suffix}")
     except: pass
 
@@ -166,7 +154,7 @@ def get_macro_weather():
     except: return "📡 UNKNOWN", "Macro weather currently unavailable.", "gray"
 
 def format_score_icon(val):
-    if val >= 75: return f"🌟 {val:.0f}"
+    if val >= 80: return f"🌟 {val:.0f}"
     elif val >= 60: return f"⭐ {val:.0f}"
     else: return f"🔸 {val:.0f}"
 
@@ -231,9 +219,8 @@ with st.sidebar:
         res = st.session_state['agent_result']
         st.success(f"Detected: BUY {res['qty']} {res['symbol']} @ ₹{res['price']}")
         
-        a_own = st.selectbox("Assign Owner", db_owners)
-        new_own = st.text_input("OR Create New Owner:")
-        f_own = new_own.strip() if new_own.strip() else a_own
+        a_own = st.selectbox("Assign Owner", db_owners + ["+ Add New Portfolio"])
+        f_own = st.text_input("New Name:") if a_own == "+ Add New Portfolio" else a_own
             
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
@@ -249,7 +236,6 @@ with st.sidebar:
 # ===================== HEADER =====================
 st.markdown("<div style='text-align:center;'><h1 class='gradient-text' style='font-size: 3rem;'>Titan Quantum Pro V2.1</h1></div>", unsafe_allow_html=True)
 
-# MACRO WEATHER
 status, msg, css_class = get_macro_weather()
 border_color = "#00FF88" if "green" in css_class else "#FF4B4B" if "red" in css_class else "#A0ABBA" if "gray" in css_class else "#FFC107"
 bg_color = f"rgba({0 if 'green' in css_class else 255 if 'red' in css_class else 160 if 'gray' in css_class else 255}, {255 if 'green' in css_class else 75 if 'red' in css_class else 171 if 'gray' in css_class else 193}, {136 if 'green' in css_class else 75 if 'red' in css_class else 186 if 'gray' in css_class else 7}, 0.05)"
@@ -391,14 +377,12 @@ with tabs[1]:
         pdf = pd.DataFrame(port_calc)
         t_inv, t_cur = pdf['invested'].sum(), pdf['val'].sum()
         
-        # Portfolio Summary Metrics
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("💰 Total Invested", f"Rs.{t_inv:,.2f}")
         c2.metric("📈 Current Value", f"Rs.{t_cur:,.2f}", f"Rs.{t_cur - t_inv:,.2f}")
         c3.metric("🎯 Net P&L %", f"{(t_cur - t_inv) / t_inv * 100:.2f}%" if t_inv > 0 else "0%")
         c4.metric("⚠️ Avg Damage Score", f"{total_dmg / len(pdf):.0f}/100", delta_color="inverse")
 
-        # Pie Charts for Portfolio Allocation
         st.markdown("##### 🥧 Allocation Breakdown")
         pc1, pc2 = st.columns(2)
         with pc1:
@@ -413,7 +397,6 @@ with tabs[1]:
         st.markdown("##### 📊 Active Holdings")
         def color_pnl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B' if val < 0 else 'white'}; font-weight: bold;"
         
-        # Clean rename for headers
         display_pdf = pdf[['verdict', 'damage', 'symbol', 'qty', 'entry', 'cmp', 'pnl_pct', 'profit', 'locked_target', 'stop', 'proximity', 'days_held']].rename(
             columns={'verdict': 'Action', 'damage': 'Damage', 'symbol': 'Stock', 'qty': 'Qty', 'entry': 'Entry (₹)', 'cmp': 'CMP (₹)', 'pnl_pct': 'P&L (%)', 'profit': 'P&L (₹)', 'locked_target': 'Target (₹)', 'stop': 'Trail SL (₹)', 'proximity': 'SL Alert', 'days_held': 'Days Held'}
         )
@@ -505,26 +488,27 @@ with tabs[2]:
     
     with st.expander("📚 Knowledge Bytes: How to Screen"):
         st.markdown("""
-        * **Score > 60 & Prob > 60%:** The sweet spot for high-probability swing trades.
+        * **Strict Score & Prob:** Use the 'High Conviction' toggle to enforce Score >= 80, Prob >= 60%, and Upside > 8%.
         * **Relative Strength:** Prioritize stocks showing 'Outperforming'. They move up even when Nifty drops.
         * **Avoid Weakness:** Never buy a stock if the Weekly Trend is 'Bearish', even if the daily chart looks good.
         """)
         
     c1, c2, c3 = st.columns([2, 1, 1])
     search_sym = c1.multiselect("🔍 Search Stocks (Leave blank for all)", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
-    show_top = c2.toggle("🔥 High Conviction Only (Score > 60)")
+    # STRICT HIGH CONVICTION RULES APPLIED HERE
+    show_top = c2.toggle("🔥 High Conviction Only") 
     req_rs = c3.checkbox("👑 Only Nifty Outperformers")
     
     if not df.empty:
         scr_df = df.copy()
         if search_sym: scr_df = scr_df[scr_df['SYMBOL'].isin(search_sym)]
-        if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 60) & (scr_df['PROBABILITY'] >= 60)]
+        # STRICT RULE ENFORCEMENT
+        if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 80) & (scr_df['PROBABILITY'] >= 60) & (scr_df['UPSIDE_PCT'] > 8.0)]
         if req_rs: scr_df = scr_df[scr_df['RELATIVE_STRENGTH'] == 'Outperforming']
 
         scr_df['PROBABILITY'] = scr_df['PROBABILITY'].apply(format_prob_icon)
         scr_df['SCORE'] = scr_df['SCORE'].apply(format_score_icon)
 
-        # Strict Sorting: Score -> Probability -> Upside
         st.dataframe(
             scr_df[['CLEAN_VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'SECTOR', 'EST_PERIOD', 'PRICE', 'TARGET', 'UPSIDE_PCT', 'RELATIVE_STRENGTH', 'TURNOVER_CR']]
             .sort_values(['SCORE', 'PROBABILITY', 'UPSIDE_PCT'], ascending=[False, False, False])
@@ -580,11 +564,13 @@ with tabs[4]:
         
         c1, c2 = st.columns([2, 1])
         penny_search = c1.multiselect("🔍 Search Penny Stocks", sorted(df[df['PRICE'] < 100]['SYMBOL'].dropna().unique()))
+        # STRICT HIGH CONVICTION RULES APPLIED HERE
         penny_top = c2.toggle("🔥 High Conviction Only (Penny)")
 
         penny = df[df['PRICE'] < 100].copy()
         if penny_search: penny = penny[penny['SYMBOL'].isin(penny_search)]
-        if penny_top: penny = penny[(penny['SCORE'] >= 50) & (penny['PROBABILITY'] >= 50)]
+        # STRICT RULE ENFORCEMENT
+        if penny_top: penny = penny[(penny['SCORE'] >= 80) & (penny['PROBABILITY'] >= 60) & (penny['UPSIDE_PCT'] > 8.0)]
 
         penny['PROBABILITY'] = penny['PROBABILITY'].apply(format_prob_icon)
         penny['SCORE'] = penny['SCORE'].apply(format_score_icon)
@@ -649,11 +635,11 @@ with tabs[6]:
         **Target Hold:** 5-10 days
         **Minimum Target:** 10% profit
         **Stop Loss:** 1.8 x ATR (typically 6-8%)
-        **Entry Filter:** Probability >= 60%, Score >= 60
+        **Entry Filter:** Probability >= 60%, Score >= 80
         
         **🟢 BUY Rules:**
-        1. Only enter if Win Probability >= 60%
-        2. Ensure R:R ratio >= 1:1.5
+        1. Only enter if Win Probability >= 60% and Score >= 80
+        2. Ensure Upside > 8%
         3. Check market regime is Bull or Strong Bull
         4. Verify no earnings in next 7 days
         5. Max 5 positions per day

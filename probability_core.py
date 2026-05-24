@@ -39,20 +39,30 @@ class ProbabilityEngine:
         except: pass
 
     def calculate_volume_profile_sr(self, df, bins=20):
-        """Calculates true Support/Resistance based on Volume Nodes."""
+        """Calculates true Support/Resistance based on Volume Nodes & ATR."""
         if len(df) < 60: return df['Close'].iloc[-1] * 0.9, df['Close'].iloc[-1] * 1.1
         
         recent_df = df.iloc[-60:].copy()
         hist, bins_edges = np.histogram(recent_df['Close'], bins=bins, weights=recent_df['Volume'])
         cmp = recent_df['Close'].iloc[-1]
         
+        # Dynamic Volatility (ATR) for Blue-Sky breakouts
+        try:
+            recent_df['ATR'] = recent_df['High'] - recent_df['Low']
+            atr = recent_df['ATR'].rolling(14).mean().iloc[-1]
+            if pd.isna(atr): atr = cmp * 0.02
+        except: 
+            atr = cmp * 0.02
+        
         support_nodes = [(hist[i], (bins_edges[i] + bins_edges[i+1])/2) for i in range(len(hist)) if (bins_edges[i] + bins_edges[i+1])/2 < cmp]
         resistance_nodes = [(hist[i], (bins_edges[i] + bins_edges[i+1])/2) for i in range(len(hist)) if (bins_edges[i] + bins_edges[i+1])/2 > cmp]
             
-        support = sorted(support_nodes, reverse=True)[0][1] if support_nodes else cmp * 0.90
-        resistance = sorted(resistance_nodes, reverse=True)[0][1] if resistance_nodes else cmp * 1.15
+        support = sorted(support_nodes, reverse=True)[0][1] if support_nodes else cmp - (2 * atr)
+        # Replaces the flat 15% with a mathematical 3x ATR projection for all-time highs
+        resistance = sorted(resistance_nodes, reverse=True)[0][1] if resistance_nodes else cmp + (3 * atr)
+        
         return support, resistance
-
+    
     def calculate_dynamic_stop(self, df, atr):
         """Context-Aware Stop Loss: max(1.8*ATR, Recent 10-day Swing Low)"""
         cmp = df['Close'].iloc[-1]

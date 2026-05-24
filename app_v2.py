@@ -761,7 +761,7 @@ with tabs[1]:
                 </div>
                 """, unsafe_allow_html=True)
 
-st.markdown("---")
+        st.markdown("---")
         st.subheader("⚙️ Manual Portfolio Management")
 
         col_a1, col_a2 = st.columns(2)

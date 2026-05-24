@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from supabase import create_client
 from probability_core import ProbabilityEngine
-from titan_agent import configure_gemini, parse_with_gemini, get_response
+from titan_agent import parse_trade_text, parse_order_image, get_response
 
 # Pandas 2.0+ compatibility patch for pandas_ta
 if not hasattr(pd.Series, "append"):
@@ -52,16 +52,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== DATABASE & AI INITIALIZATION =====================
+# ===================== DATABASE =====================
 @st.cache_resource
 def init_connection():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 engine = ProbabilityEngine()
-
-# Initialize Gemini with API key from secrets
-configure_gemini(st.secrets["GEMINI_API_KEY"])
 
 @st.cache_data(ttl=120)
 def load_market_data():
@@ -118,19 +115,72 @@ def load_table(table_name):
     try: return pd.DataFrame(supabase.table(table_name).select("*").execute().data)
     except: return pd.DataFrame()
 
+# ===================== KNOWLEDGE ARTICLES (RESTORED) =====================
+KNOWLEDGE = {
+    "score": """
+    #### 📊 What is Confluence Score (0-100)?
+    The score combines 6 factors: Trend Alignment (25 pts), Momentum Health (20 pts),
+    Price Structure (20 pts), Volume Signature (15 pts), Relative Strength (10 pts),
+    and Macro Safety (10 pts). Higher = stronger setup.
+    """,
+    "probability": """
+    #### 🎯 What is Win Probability %?
+    Bayesian probability calculated from: Base Rate (historical accuracy of similar scores)
+    x Market Regime Multiplier x Sector Breadth x Relative Strength Filter.
+    A 75% probability means 3 out of 4 similar setups historically succeeded.
+    """,
+    "damage": """
+    #### 💀 What is Damage Score (0-100)?
+    Measures how badly a holding is deteriorating: Structural Break (40 pts max),
+    Momentum Reversal (30 pts), Volume Signature (20 pts), Time Decay (10 pts).
+    **0-30:** Normal pullback, HOLD
+    **31-55:** Risk rising, TIGHTEN STOP
+    **56-80:** Structure damaged, SCALE OUT 50%
+    **81-100:** Trend broken, EXIT IMMEDIATE
+    """,
+    "rvol": """
+    #### 📈 What is RVOL (Relative Volume)?
+    Current volume / 20-day average volume. RVOL > 1.5x means unusual activity.
+    RVOL > 2.0x often signals institutional accumulation or distribution.
+    """,
+    "rr": """
+    #### ⚖️ What is Risk:Reward Ratio?
+    Potential reward / Potential risk. A 1:2 ratio means you risk Rs.1 to make Rs.2.
+    We target minimum 1:1.5 for swing trades. Higher is better.
+    """,
+    "pattern": """
+    #### 🕯️ Chart Patterns Explained
+    **⚡ VCP Squeeze:** Volatility contracting with volume drying up. Explosive move imminent.
+    **🟢 Bullish Engulfing:** Today's candle completely covers yesterday's red candle. Reversal signal.
+    **Consolidating:** Price moving sideways. Wait for breakout above resistance.
+    **Uptrending:** Higher highs and higher lows. Buy dips to EMA.
+    """,
+    "regime": """
+    #### 🌍 Market Regime Guide
+    **Strong Bull:** All EMAs aligned up. Deploy full capital.
+    **Bull:** Price above 50 EMA. Normal trading.
+    **Sideways:** No clear trend. Reduce position sizes.
+    **Bear:** Below 50 EMA. Only short or cash.
+    **Volatile Bear:** High volatility + downtrend. Avoid new trades.
+    """,
+    "session": """
+    #### ⏰ Intraday Session Adjustments
+    Early morning (9:15-10:00): Volume is building. Scores discounted by 14%.
+    Mid session (11:00-13:00): Volume normalizes. Scores discounted by 5%.
+    Late session (14:00-15:30): Most reliable data. Scores at 98% confidence.
+    Always verify with EOD scan for final decisions.
+    """
+}
+
 # ===================== HELPERS =====================
 def get_index_data(ticker_symbol):
     try:
         idx = yfinance.Ticker(ticker_symbol)
         hist = idx.history(period="5d")
         if len(hist) >= 2:
-            close_tdy = hist['Close'].iloc[-1]
-            close_yst = hist['Close'].iloc[-2]
-            pct_change = ((close_tdy - close_yst) / close_yst) * 100
-            return close_tdy, pct_change
+            return hist['Close'].iloc[-1], ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
         return None, None
-    except:
-        return None, None
+    except: return None, None
 
 @st.cache_data(ttl=300)
 def fetch_chart_data(symbol):
@@ -141,7 +191,6 @@ def render_interactive_chart(symbol, unique_key_suffix=""):
     try:
         data = fetch_chart_data(symbol).copy() 
         if data.empty: return st.error(f"Chart data unavailable for {symbol}.")
-
         if isinstance(data.columns, pd.MultiIndex): data.columns = [col[0] for col in data.columns]
         if data.index.tzinfo is not None: data.index = data.index.tz_localize(None)
 
@@ -153,7 +202,6 @@ def render_interactive_chart(symbol, unique_key_suffix=""):
             name='Price', increasing_line_color='#00FF88', decreasing_line_color='#FF4B4B')])
         fig.add_trace(go.Scatter(x=data.index, y=data['EMA20'], line=dict(color='#00B8FF', width=1.5), name='20 EMA'))
         fig.add_trace(go.Scatter(x=data.index, y=data['EMA50'], line=dict(color='#FFC107', width=1.5), name='50 EMA'))
-
         fig.update_layout(title=dict(text=f"{symbol} - Live Technicals", font=dict(color='#E0E6ED')),
                           template='plotly_dark', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                           height=400, margin=dict(l=0, r=0, t=40, b=0), xaxis_rangeslider_visible=False)
@@ -227,26 +275,26 @@ with st.sidebar:
     st.caption(f"Last Sync: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
     st.markdown("---")
-    st.markdown("### 🤖 Titan AI Agent")
+    st.markdown("### 🤖 Titan Agent")
     # Changed to text_input for mobile compatibility
     agent_input = st.text_input("💬 Type trade command:", placeholder="e.g. Bought 50 RELIANCE at 2450")
     uploaded_image = st.file_uploader("📷 Upload order screenshot", type=['png', 'jpg', 'jpeg'])
 
     if st.button("🚀 Process Intelligence", use_container_width=True):
-        with st.spinner("Gemini AI is analyzing..."):
-            if uploaded_image:
-                parsed_result = parse_with_gemini(image_file=uploaded_image)
-            elif agent_input:
-                parsed_result = parse_with_gemini(text_input=agent_input)
-            else:
-                parsed_result = None
-                st.info("Type a command or upload an image first.")
-
-            if parsed_result:
-                st.session_state['agent_result'] = parsed_result
-                response = get_response(parsed_result, portfolio_df=port_df, market_df=df)
-                st.session_state['agent_response'] = response
-                st.markdown(f"<div style='background:#141824; border:1px solid #2A3143; padding:15px; border-radius:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>{response}</div>", unsafe_allow_html=True)
+        if uploaded_image:
+            ocr_result = parse_order_image(uploaded_image)
+            if ocr_result and 'error' not in ocr_result:
+                st.session_state['agent_result'] = ocr_result
+                st.success(f"✅ Detected: {ocr_result['action']} {ocr_result['qty']:.0f} {ocr_result['symbol']} @ Rs.{ocr_result['price']:.2f}")
+            else: st.error("Could not read order from image. Try typing instead.")
+        elif agent_input:
+            parsed = parse_trade_text(agent_input)
+            response = get_response(parsed, portfolio_df=port_df, market_df=df)
+            st.session_state['agent_response'] = response
+            if parsed: st.session_state['agent_result'] = parsed
+            st.markdown(f"<div style='background:#141824; border:1px solid #2A3143; padding:15px; border-radius:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>{response}</div>", unsafe_allow_html=True)
+        else:
+            st.info("Type a command or upload an image.")
 
     # Quick action from agent
     if 'agent_result' in st.session_state and st.session_state['agent_result'].get('action') == 'BUY':
@@ -629,7 +677,6 @@ with tabs[2]:
         st.markdown(f"### 📋 Screener ({len(filtered_df):.0f} stocks)")
         disp_cols = ['VERDICT', 'SCORE', 'PROBABILITY', 'SYMBOL', 'SECTOR', 'PATTERN', 'EST_PERIOD', 'PRICE', 'TARGET', 'UPSIDE_%', 'RVOL', 'RR_RATIO']
         
-        # Apply neat icons instead of progress bars
         display_filtered = filtered_df[disp_cols].sort_values(['PROBABILITY', 'SCORE', 'UPSIDE_%'], ascending=[False, False, False]).copy()
         display_filtered['PROBABILITY'] = display_filtered['PROBABILITY'].apply(lambda x: format_score_icon(x, is_pct=True))
         display_filtered['SCORE'] = display_filtered['SCORE'].apply(lambda x: format_score_icon(x, is_pct=False))
@@ -679,7 +726,6 @@ with tabs[4]:
             p_search = st.selectbox("Search", ["ALL"] + sorted(penny_df['SYMBOL'].dropna().unique().tolist()))
             if p_search != "ALL": penny_df = penny_df[penny_df['SYMBOL'] == p_search]
 
-            # Apply neat icons instead of progress bars
             penny_df['PROBABILITY'] = penny_df['PROBABILITY'].apply(lambda x: format_score_icon(x, is_pct=True))
             penny_df['SCORE'] = penny_df['SCORE'].apply(lambda x: format_score_icon(x, is_pct=False))
 
@@ -712,13 +758,71 @@ with tabs[5]:
     else: st.info(f"No trade history found for {h_owner}")
 
 # ==========================================
-# TAB 6: KNOWLEDGE HUB
+# TAB 6: KNOWLEDGE HUB (RESTORED)
 # ==========================================
 with tabs[6]:
     st.subheader("📚 Trading Knowledge Hub")
-    st.markdown("""
-    **Confluence Score (0-100):** Combines Trend, Momentum, Structure, Volume, RS, and Macro Safety.
-    **Win Probability:** Bayesian math using historical accuracy, sector breadth, and regime.
-    **Exit Damage Score (0-100):** Measures trend breakdown. >80 = Immediate Exit.
-    **RVOL:** Relative Volume. >1.5x means unusual activity.
-    """)
+    st.caption("Understand every metric and signal in the app")
+
+    topic = st.selectbox("Select Topic:", [
+        "Confluence Score", "Win Probability", "Exit Damage Score", "RVOL (Volume)",
+        "Risk:Reward Ratio", "Chart Patterns", "Market Regime", "Intraday Sessions"
+    ])
+
+    topic_map = {
+        "Confluence Score": "score", "Win Probability": "probability",
+        "Exit Damage Score": "damage", "RVOL (Volume)": "rvol",
+        "Risk:Reward Ratio": "rr", "Chart Patterns": "pattern",
+        "Market Regime": "regime", "Intraday Sessions": "session"
+    }
+
+    if topic in topic_map:
+        st.markdown(f"<div style='background:#141824; padding:20px; border-radius:12px; border:1px solid #2A3143;'>", unsafe_allow_html=True)
+        st.markdown(KNOWLEDGE[topic_map[topic]], unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    col_rule1, col_rule2 = st.columns(2)
+    
+    with col_rule1:
+        st.subheader("🎓 Trading Rules for Your Strategy")
+        st.markdown("""
+        #### 📋 Your Strategy Parameters
+        **Capital per Trade:** Rs.10,000
+        **Max Trades/Day:** 5
+        **Target Hold:** 5-10 days
+        **Minimum Target:** 10% profit
+        **Stop Loss:** 1.8 x ATR (typically 6-8%)
+        **Entry Filter:** Probability >= 60%, Score >= 60
+        
+        **🟢 BUY Rules:**
+        1. Only enter if Win Probability >= 60%
+        2. Ensure R:R ratio >= 1:1.5
+        3. Check market regime is Bull or Strong Bull
+        4. Verify no earnings in next 7 days
+        5. Max 5 positions per day
+        
+        **🔴 SELL Rules:**
+        1. If Damage Score >= 80 -> EXIT IMMEDIATE
+        2. If Damage Score 56-80 -> SCALE OUT 50%
+        3. If target hit -> Sell 50%, trail rest with breakeven stop
+        4. If held >14 days with <2% profit -> Consider exit
+        5. If gap down >10% -> Emergency exit
+        """, unsafe_allow_html=True)
+
+    with col_rule2:
+        st.subheader("🤖 How to Use Titan Agent")
+        st.markdown("""
+        #### 💬 Chat Commands
+        **Type natural language:**
+        • "Bought 50 RELIANCE at 2450" -> Auto-detects and suggests adding to portfolio
+        • "How is my portfolio?" -> Shows summary
+        • "Top picks today?" -> Shows best opportunities
+        • "How is the market?" -> Shows regime status
+        
+        #### 📷 Upload Screenshots
+        • Take screenshot of your broker order (Zerodha/Groww/Upstox)
+        • Upload to the sidebar agent
+        • Titan Agent reads it via OCR
+        • Confirm to auto-add to portfolio
+        """, unsafe_allow_html=True)

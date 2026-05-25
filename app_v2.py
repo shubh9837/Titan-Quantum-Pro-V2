@@ -24,7 +24,7 @@ def get_ist_now(): return datetime.datetime.now(IST)
 
 st.set_page_config(page_title="Titan Quantum Pro V2.1", layout="wide", page_icon="💎")
 
-# ===================== CSS STYLING =====================
+# ===================== CSS STYLING & MOBILE FIX =====================
 st.markdown("""
 <style>
     .main { background-color: #0B0E14; color: #E0E6ED; font-family: 'Inter', sans-serif; }
@@ -43,6 +43,18 @@ st.markdown("""
         background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         font-weight: 800; margin-bottom: 0;
+    }
+    /* MOBILE FLEXBOX METRIC SCROLLING */
+    @media (max-width: 768px) {
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 10px;
+        }
+        [data-testid="column"] { min-width: 150px !important; }
+        [data-testid="stHorizontalBlock"]::-webkit-scrollbar { height: 4px; }
+        [data-testid="stHorizontalBlock"]::-webkit-scrollbar-thumb { background-color: #00B8FF; border-radius: 4px; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -98,7 +110,7 @@ KNOWLEDGE = {
 # ===================== HELPERS & CHARTING =====================
 def get_index_data(ticker_symbol):
     try:
-        idx = yfinance.Ticker(ticker_symbol)
+        idx = yf.Ticker(ticker_symbol)
         hist = idx.history(period="5d")
         if len(hist) >= 2: return hist['Close'].iloc[-1], ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
     except: return None, None
@@ -127,10 +139,11 @@ def render_interactive_chart(symbol, unique_key_suffix=""):
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{symbol}_{unique_key_suffix}")
     except: pass
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_macro_weather():
     now_ist = get_ist_now()
     try:
+        # Pre-Market Global Check
         if now_ist.hour < 9 or (now_ist.hour == 9 and now_ist.minute < 15):
             gift, gift_pct = get_index_data("GIFNIF.NS")
             sp500, sp_pct = get_index_data("^GSPC")
@@ -138,15 +151,29 @@ def get_macro_weather():
             if direction > 0.4: return "🐂 GLOBAL CUES: POSITIVE", "Expect a Gap-Up opening.", "green"
             elif direction < -0.4: return "🐻 GLOBAL CUES: NEGATIVE", "Expect a weak opening. Caution.", "red"
             else: return "⚖️ GLOBAL CUES: FLAT", "Expect a flat opening.", "yellow"
+        
+        # Live Market Indian Check (Rapid Intraday Fetch)
         else:
-            nifty_val, nifty_pct = get_index_data("^NSEI")
-            nifty_hist = fetch_chart_data("^NSEI")
-            if nifty_hist.empty: return "📡 DATA DELAYED", "NIFTY data temporarily unavailable.", "gray"
+            nifty_daily = yf.download("^NSEI", period="3mo", progress=False, ignore_tz=True)
+            if isinstance(nifty_daily.columns, pd.MultiIndex): nifty_daily.columns = [c[0] for c in nifty_daily.columns]
+            if nifty_daily.empty: return "📡 DATA DELAYED", "NIFTY data temporarily unavailable.", "gray"
             
-            close = float(nifty_hist['Close'].iloc[-1])
-            ema20 = nifty_hist['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
-            ema50 = nifty_hist['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
-            idx_str = f"NIFTY: {nifty_val:.2f} ({nifty_pct:+.2f}%)"
+            # Fetch 5-min intervals for the absolute live tick
+            nifty_live = yf.download("^NSEI", period="1d", interval="5m", progress=False, ignore_tz=True)
+            if isinstance(nifty_live.columns, pd.MultiIndex): nifty_live.columns = [c[0] for c in nifty_live.columns]
+
+            if not nifty_live.empty:
+                close = float(nifty_live['Close'].iloc[-1])
+                prev_close = float(nifty_daily['Close'].iloc[-2]) if len(nifty_daily) > 1 else close
+                nifty_pct = ((close - prev_close) / prev_close) * 100
+            else:
+                close = float(nifty_daily['Close'].iloc[-1])
+                prev_close = float(nifty_daily['Close'].iloc[-2]) if len(nifty_daily) > 1 else close
+                nifty_pct = ((close - prev_close) / prev_close) * 100
+            
+            ema20 = nifty_daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
+            ema50 = nifty_daily['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
+            idx_str = f"NIFTY: {close:.2f} ({nifty_pct:+.2f}%)"
             
             if close > ema20: return "🐂 RISK ON (BULLISH)", f"{idx_str} | Uptrend above 20 EMA.", "green"
             elif close > ema50: return "⚖️ CAUTION (SIDEWAYS)", f"{idx_str} | Below 20 EMA but holding 50 EMA.", "yellow"
@@ -196,7 +223,8 @@ with st.sidebar:
     st.markdown("<h3 class='gradient-text'>💎 Titan Quantum Pro</h3>", unsafe_allow_html=True)
     st.caption(f"IST Sync: {get_ist_now().strftime('%d %b %H:%M')}")
     if st.button("🔄 Refresh Data", use_container_width=True):
-        st.cache_data.clear()
+        load_market_data.clear()
+        load_table.clear()
         safe_rerun()
 
     st.markdown("---")
@@ -230,7 +258,7 @@ with st.sidebar:
                 }).execute()
                 st.success("Logged!")
                 del st.session_state['agent_result']
-                st.cache_data.clear()
+                load_table.clear()
                 safe_rerun()
 
 # ===================== HEADER =====================
@@ -323,7 +351,7 @@ with tabs[0]:
                             if final_own:
                                 supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": final_own}).execute()
                                 st.success(f"Added to {final_own}'s ledger!")
-                                st.cache_data.clear()
+                                load_table.clear()
                                 safe_rerun()
         else: st.info("🟡 No safe setups matching your strategy criteria. Cash is a position.")
     else: st.error("No data available.")
@@ -343,7 +371,7 @@ with tabs[1]:
             return h_dict
 
         bulk_hist = fetch_safe_portfolio_history(active_port['symbol'].unique().tolist())
-        port_calc, total_dmg = [], 0
+        port_calc, total_dmg, total_risk = [], 0, 0
 
         for _, row in active_port.iterrows():
             sym = row['symbol']
@@ -365,6 +393,10 @@ with tabs[1]:
             pnl_pct = ((cmp - entry) / entry) * 100
             val = cmp * qty
             
+            # SL Heat Risk Calculation
+            risk_per_share = max(0, cmp - stop)
+            total_risk += risk_per_share * qty
+            
             sl_proximity = ""
             if cmp <= stop: sl_proximity = "🔴 HIT"
             elif cmp <= stop * 1.02: sl_proximity = "⚠️ NEAR"
@@ -377,20 +409,23 @@ with tabs[1]:
         pdf = pd.DataFrame(port_calc)
         t_inv, t_cur = pdf['invested'].sum(), pdf['val'].sum()
         
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("💰 Total Invested", f"Rs.{t_inv:,.2f}")
         c2.metric("📈 Current Value", f"Rs.{t_cur:,.2f}", f"Rs.{t_cur - t_inv:,.2f}")
         c3.metric("🎯 Net P&L %", f"{(t_cur - t_inv) / t_inv * 100:.2f}%" if t_inv > 0 else "0%")
-        c4.metric("⚠️ Avg Damage Score", f"{total_dmg / len(pdf):.0f}/100", delta_color="inverse")
+        c4.metric("⚠️ Avg Damage", f"{total_dmg / len(pdf):.0f}/100", delta_color="inverse")
+        c5.metric("🔥 Total Risk (SL Heat)", f"Rs.{total_risk:,.2f}", delta_color="inverse")
 
         st.markdown("##### 🥧 Allocation Breakdown")
         pc1, pc2 = st.columns(2)
+        # Soothing Pastel Color Sequence
+        colors = px.colors.qualitative.Pastel
         with pc1:
-            fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4)
+            fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4, color_discrete_sequence=colors)
             fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
             st.plotly_chart(fig_sym, use_container_width=True)
         with pc2:
-            fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4)
+            fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4, color_discrete_sequence=colors)
             fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
             st.plotly_chart(fig_sec, use_container_width=True)
 
@@ -450,7 +485,7 @@ with tabs[1]:
                     if f_own and a_sym:
                         supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
                         st.success(f"Holding Added to {f_own}!")
-                        st.cache_data.clear()
+                        load_table.clear()
                         safe_rerun()
 
         elif action == "➖ Exit Holding":
@@ -459,25 +494,29 @@ with tabs[1]:
                 if not active_port.empty:
                     s_sym = st.selectbox("Stock to Exit", active_port['symbol'].unique())
                     holding = active_port[active_port['symbol'] == s_sym].iloc[0] if s_sym else None
-                    c1, c2 = st.columns(2)
+                    c1, c2, c3 = st.columns([1, 1, 1.5])
                     s_qty = c1.number_input(f"Qty (Max: {holding['qty'] if holding is not None else 0})", min_value=1, step=1)
                     s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
-                    s_rsn = st.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
+                    s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
+                    
+                    # Pro-Trader Trade Journal Setup Tag
+                    s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
                         if s_qty <= holding['qty']:
                             if "Delete" not in s_rsn:
+                                full_reason = f"{s_rsn} | Setup: {s_tag}"
                                 supabase.table('trade_history').insert({
                                     "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(s_qty),
                                     "buy_price": float(holding['entry_price']), "realized_pl": float((s_price - float(holding['entry_price'])) * s_qty),
                                     "pl_percentage": float(((s_price - float(holding['entry_price']))/float(holding['entry_price']))*100),
-                                    "sell_date": str(datetime.date.today()), "exit_reason": s_rsn, "owner": holding['owner']
+                                    "sell_date": str(datetime.date.today()), "exit_reason": full_reason, "owner": holding['owner']
                                 }).execute()
                             n_qty = holding['qty'] - s_qty
                             if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding['id']).execute()
                             else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding['id']).execute()
-                            st.success("Sale Executed!")
-                            st.cache_data.clear()
+                            st.success("Sale Executed & Journaled!")
+                            load_table.clear()
                             safe_rerun()
                         else: st.error("Cannot sell more than held.")
                 else: st.info("No stocks to sell.")
@@ -495,14 +534,12 @@ with tabs[2]:
         
     c1, c2, c3 = st.columns([2, 1, 1])
     search_sym = c1.multiselect("🔍 Search Stocks (Leave blank for all)", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
-    # STRICT HIGH CONVICTION RULES APPLIED HERE
     show_top = c2.toggle("🔥 High Conviction Only") 
     req_rs = c3.checkbox("👑 Only Nifty Outperformers")
     
     if not df.empty:
         scr_df = df.copy()
         if search_sym: scr_df = scr_df[scr_df['SYMBOL'].isin(search_sym)]
-        # STRICT RULE ENFORCEMENT
         if show_top: scr_df = scr_df[(scr_df['SCORE'] >= 90) & (scr_df['PROBABILITY'] >= 60) & (scr_df['UPSIDE_PCT'] > 8.0)]
         if req_rs: scr_df = scr_df[scr_df['RELATIVE_STRENGTH'] == 'Outperforming']
 
@@ -564,12 +601,10 @@ with tabs[4]:
         
         c1, c2 = st.columns([2, 1])
         penny_search = c1.multiselect("🔍 Search Penny Stocks", sorted(df[df['PRICE'] < 100]['SYMBOL'].dropna().unique()))
-        # STRICT HIGH CONVICTION RULES APPLIED HERE
         penny_top = c2.toggle("🔥 High Conviction Only (Penny)")
 
         penny = df[df['PRICE'] < 100].copy()
         if penny_search: penny = penny[penny['SYMBOL'].isin(penny_search)]
-        # STRICT RULE ENFORCEMENT
         if penny_top: penny = penny[(penny['SCORE'] >= 85) & (penny['PROBABILITY'] >= 70) & (penny['UPSIDE_PCT'] > 8.0)]
 
         penny['PROBABILITY'] = penny['PROBABILITY'].apply(format_prob_icon)

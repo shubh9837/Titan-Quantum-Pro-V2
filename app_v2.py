@@ -44,17 +44,20 @@ st.markdown("""
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         font-weight: 800; margin-bottom: 0;
     }
-    /* MOBILE FLEXBOX METRIC SCROLLING */
+    /* MOBILE FLEXBOX METRIC SCROLLING (Scoped only to metrics) */
     @media (max-width: 768px) {
-        [data-testid="stHorizontalBlock"] {
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) {
             flex-wrap: nowrap !important;
             overflow-x: auto !important;
             -webkit-overflow-scrolling: touch;
             padding-bottom: 10px;
         }
-        [data-testid="column"] { min-width: 150px !important; }
-        [data-testid="stHorizontalBlock"]::-webkit-scrollbar { height: 4px; }
-        [data-testid="stHorizontalBlock"]::-webkit-scrollbar-thumb { background-color: #00B8FF; border-radius: 4px; }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) > [data-testid="column"] { 
+            min-width: 180px !important; 
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.8rem !important; /* Slightly smaller to prevent truncation */
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -218,6 +221,15 @@ if not hist_df.empty:
 db_owners = list(set(p_owners + h_owners))
 db_owners = sorted([o for o in db_owners if pd.notna(o)]) if db_owners else ["Main"]
 
+# Default Portfolio Selection Logic
+default_owner_idx = 0
+if not port_df.empty:
+    active_owners = port_df['owner'].unique().tolist()
+    for i, owner in enumerate(db_owners):
+        if owner in active_owners:
+            default_owner_idx = i
+            break
+
 # ===================== SIDEBAR =====================
 with st.sidebar:
     st.markdown("<h3 class='gradient-text'>💎 Titan Quantum Pro</h3>", unsafe_allow_html=True)
@@ -343,7 +355,7 @@ with tabs[0]:
                     with col1:
                         st.info(f"💡 Suggestion: **{g['Est_Qty']}** shares (₹10k)")
                     with col2:
-                        sel = st.selectbox("Select Existing Owner", db_owners, key=f"sel_{idx}")
+                        sel = st.selectbox("Select Existing Owner", db_owners, key=f"sel_{idx}", index=default_owner_idx)
                         f_own_input = st.text_input("OR Create New Owner:", key=f"fown_{idx}") 
                         final_own = f_own_input.strip() if f_own_input.strip() else sel
                         
@@ -358,7 +370,7 @@ with tabs[0]:
 
 # --- TAB 1: PORTFOLIO INTELLIGENCE ---
 with tabs[1]:
-    view_owner = st.selectbox("👤 Select Portfolio to View", db_owners)
+    view_owner = st.selectbox("👤 Select Portfolio to View", db_owners, index=default_owner_idx)
     active_port = port_df[port_df['owner'] == view_owner] if not port_df.empty else pd.DataFrame()
 
     if not active_port.empty:
@@ -418,15 +430,14 @@ with tabs[1]:
 
         st.markdown("##### 🥧 Allocation Breakdown")
         pc1, pc2 = st.columns(2)
-        # Soothing Pastel Color Sequence
         colors = px.colors.qualitative.Pastel
         with pc1:
             fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4, color_discrete_sequence=colors)
-            fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
+            fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sym, use_container_width=True)
         with pc2:
             fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4, color_discrete_sequence=colors)
-            fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350)
+            fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sec, use_container_width=True)
 
         st.markdown("##### 📊 Active Holdings")
@@ -477,7 +488,7 @@ with tabs[1]:
                 a_qty = c2.number_input("Quantity", min_value=1, step=1)
                 a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
                 
-                a_own = c2.selectbox("Select Existing Owner", db_owners)
+                a_own = c2.selectbox("Select Existing Owner", db_owners, index=default_owner_idx)
                 a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
                 
                 if st.form_submit_button("Add to Database"):
@@ -499,7 +510,6 @@ with tabs[1]:
                     s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
                     s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
                     
-                    # Pro-Trader Trade Journal Setup Tag
                     s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
@@ -623,7 +633,7 @@ with tabs[4]:
 with tabs[5]:
     st.subheader("🏆 Trade History & Analytics")
     col_h1, col_h2 = st.columns([1, 1])
-    h_owner = col_h1.selectbox("Select Account History", db_owners, key='hist_owner')
+    h_owner = col_h1.selectbox("Select Account History", db_owners, key='hist_owner', index=default_owner_idx)
     time_filter = col_h2.selectbox("Period", ["All Time", "This Month", "Financial Year"])
 
     h_data = hist_df[hist_df['owner'] == h_owner] if not hist_df.empty else pd.DataFrame()

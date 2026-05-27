@@ -521,7 +521,7 @@ with tabs[1]:
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
                         if s_qty <= holding['qty']:
-                            holding_id = int(holding['id']) 
+                            holding_id = int(holding.get('id', 0))
                             
                             if "Delete" not in s_rsn:
                                 full_reason = f"{s_rsn} | Setup: {s_tag}"

@@ -521,7 +521,9 @@ with tabs[1]:
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
                         if s_qty <= holding['qty']:
-                            holding_id = int(holding.get('id', 0))
+                            n_qty = int(holding['qty']) - int(s_qty)
+                            if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
+                            else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
                             
                             if "Delete" not in s_rsn:
                                 full_reason = f"{s_rsn} | Setup: {s_tag}"

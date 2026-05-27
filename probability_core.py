@@ -152,5 +152,5 @@ class ProbabilityEngine:
         final_prices = [current_price * np.prod(1 + np.random.normal(mu, sigma, holding_period_days)) for _ in range(simulations)]
         final_prices = sorted(final_prices)
         
-        # PRO TRADER: Left-skewed safety bias for targets (anticipating fast drops)
+        # PRO TRADER: Left-skewed safety bias for targets
         return final_prices[int(simulations * 0.20)], final_prices[int(simulations * 0.70)], "Calculated"

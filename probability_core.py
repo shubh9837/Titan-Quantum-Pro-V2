@@ -15,18 +15,12 @@ def safe_float(val, default=0.0):
 
 class ProbabilityEngine:
     def __init__(self):
-        # Default Bayesian Base Rates
         self.base_rates = {
             (90, 100): 0.78, (80, 89): 0.65, (70, 79): 0.52,
             (60, 69): 0.41, (50, 59): 0.30, (0, 49): 0.15
         }
 
-    # ==========================================================
-    # NEW V2.1 FEATURES
-    # ==========================================================
-    
     def calibrate_base_rates(self, supabase_client):
-        """AI Feedback Loop: Adjusts base rates based on actual trade history."""
         try:
             res = supabase_client.table('trade_history').select('buy_price, sell_price').execute()
             df = pd.DataFrame(res.data)
@@ -35,36 +29,28 @@ class ProbabilityEngine:
                 actual_win_rate = wins / len(df)
                 for k in self.base_rates:
                     self.base_rates[k] = (self.base_rates[k] * 0.7) + (actual_win_rate * 0.3)
-                print(f"🧠 Base Rates Calibrated. User Win Rate: {actual_win_rate:.1%}")
         except: pass
 
     def calculate_volume_profile_sr(self, df, bins=20):
-        """Calculates true Support/Resistance based on Volume Nodes & ATR."""
         if len(df) < 60: return df['Close'].iloc[-1] * 0.9, df['Close'].iloc[-1] * 1.1
-        
         recent_df = df.iloc[-60:].copy()
         hist, bins_edges = np.histogram(recent_df['Close'], bins=bins, weights=recent_df['Volume'])
         cmp = recent_df['Close'].iloc[-1]
         
-        # Dynamic Volatility (ATR) for Blue-Sky breakouts
         try:
             recent_df['ATR'] = recent_df['High'] - recent_df['Low']
             atr = recent_df['ATR'].rolling(14).mean().iloc[-1]
             if pd.isna(atr): atr = cmp * 0.02
-        except: 
-            atr = cmp * 0.02
+        except: atr = cmp * 0.02
         
         support_nodes = [(hist[i], (bins_edges[i] + bins_edges[i+1])/2) for i in range(len(hist)) if (bins_edges[i] + bins_edges[i+1])/2 < cmp]
         resistance_nodes = [(hist[i], (bins_edges[i] + bins_edges[i+1])/2) for i in range(len(hist)) if (bins_edges[i] + bins_edges[i+1])/2 > cmp]
             
         support = sorted(support_nodes, reverse=True)[0][1] if support_nodes else cmp - (2 * atr)
-        # Replaces the flat 15% with a mathematical 3x ATR projection for all-time highs
         resistance = sorted(resistance_nodes, reverse=True)[0][1] if resistance_nodes else cmp + (3 * atr)
-        
         return support, resistance
-    
+
     def calculate_dynamic_stop(self, df, atr):
-        """Context-Aware Stop Loss: max(1.8*ATR, Recent 10-day Swing Low)"""
         cmp = df['Close'].iloc[-1]
         atr_stop = cmp - (1.8 * atr)
         swing_low = df['Low'].iloc[-10:].min()
@@ -72,7 +58,6 @@ class ProbabilityEngine:
         return max(atr_stop, structure_stop)
 
     def calculate_composite_score(self, daily_df, weekly_df, rs_status, earnings_risk=False):
-        """Calculates composite strength summing all factors, applying VETO for critical risks."""
         score = 30 
         cmp = daily_df['Close'].iloc[-1]
         ema20 = daily_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1]
@@ -91,12 +76,13 @@ class ProbabilityEngine:
         verdict_override = None
         weekly_trend = "Neutral"
         
+        # Hard Veto Logic
         if not weekly_df.empty:
             w_cmp = weekly_df['Close'].iloc[-1]
             w_ema50 = weekly_df['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
             if w_cmp < w_ema50:
                 weekly_trend = "Bearish"
-                score -= 30 
+                score -= 40  # Hard structural penalty
                 verdict_override = "🔴 AVOID (Weekly Bearish)"
             else:
                 weekly_trend = "Bullish"
@@ -104,14 +90,9 @@ class ProbabilityEngine:
 
         if earnings_risk:
             score -= 20
-            if verdict_override is None:
-                verdict_override = "🟡 WATCH (Earnings Pending)"
+            if verdict_override is None: verdict_override = "🟡 WATCH (Earnings Pending)"
 
         return max(0, min(100, score)), weekly_trend, verdict_override
-
-    # ==========================================================
-    # ORIGINAL FEATURES (RESTORED)
-    # ==========================================================
 
     def get_intraday_adjustment(self, ist_time=None):
         if ist_time is None: ist_time = pd.Timestamp.now() + pd.Timedelta(hours=5, minutes=30)
@@ -135,6 +116,26 @@ class ProbabilityEngine:
         if cmp < ema20: damage += 25; reasons.append("Lost 20 EMA")
         if cmp < ema50: damage += 40; reasons.append("Lost 50 EMA")
         if 'RSI_14' in df and df['RSI_14'].iloc[-1] < 45: damage += 20; reasons.append("RSI < 45")
+        
+        # PRO TRADER: Anchored VWAP Logic (Lost Institutional Support)
+        if len(df) > 20:
+            max_vol_idx = df['Volume'].iloc[-60:].idxmax() if len(df) >= 60 else df['Volume'].idxmax()
+            post_breakout = df.loc[max_vol_idx:]
+            if len(post_breakout) > 3:
+                avwap = (post_breakout['Close'] * post_breakout['Volume']).cumsum() / post_breakout['Volume'].cumsum()
+                if cmp < avwap.iloc[-1] * 0.99:
+                    damage += 20
+                    reasons.append("Lost Inst. AVWAP")
+
+        # PRO TRADER: Dead Money / Velocity Time Decay
+        try:
+            days_held = (pd.Timestamp.now().date() - pd.to_datetime(entry_date).date()).days
+            pnl_pct = (cmp - entry_price) / entry_price * 100
+            if days_held >= 5 and abs(pnl_pct) < 2.0:
+                penalty = min((days_held - 4) * 10, 40)
+                damage += penalty
+                reasons.append(f"Velocity Decay (-{penalty} pts)")
+        except: pass
             
         new_stop = max(entry_price, ema50 * 0.98) if cmp > entry_price else entry_price * 0.92
         if damage >= 80: verdict = "🔴 EXIT IMMEDIATE"
@@ -150,4 +151,6 @@ class ProbabilityEngine:
         mu, sigma = returns.mean(), returns.std()
         final_prices = [current_price * np.prod(1 + np.random.normal(mu, sigma, holding_period_days)) for _ in range(simulations)]
         final_prices = sorted(final_prices)
-        return final_prices[int(simulations * 0.25)], final_prices[int(simulations * 0.80)], "Calculated"
+        
+        # PRO TRADER: Left-skewed safety bias for targets (anticipating fast drops)
+        return final_prices[int(simulations * 0.20)], final_prices[int(simulations * 0.70)], "Calculated"

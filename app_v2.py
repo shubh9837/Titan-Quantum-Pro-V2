@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import pytz
-import datetime  
+import datetime
+import time  # Added to support the UI refresh delay
 import plotly.graph_objects as go
 import plotly.express as px
 from supabase import create_client
@@ -13,11 +14,18 @@ import pandas_ta_classic as ta
 
 if not hasattr(pd.Series, "append"): pd.Series.append = pd.Series._append
 
+# THE FIX: Bulletproof rerun that clears cache and DOES NOT swallow Streamlit's internal exception
 def safe_rerun():
-    try: st.rerun()
-    except:
-        try: st.experimental_rerun()
-        except: pass
+    try:
+        load_table.clear()
+        load_market_data.clear()
+    except Exception:
+        pass
+    
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
 
 IST = pytz.timezone('Asia/Kolkata')
 def get_ist_now(): return datetime.datetime.now(IST)
@@ -251,7 +259,7 @@ with st.sidebar:
     st.markdown("<h3 class='gradient-text'>💎 Titan Quantum Pro</h3>", unsafe_allow_html=True)
     st.caption(f"IST Sync: {get_ist_now().strftime('%d %b %H:%M')}")
     if st.button("🔄 Refresh Data", use_container_width=True):
-        load_market_data.clear(); load_table.clear(); safe_rerun()
+        safe_rerun()
 
     st.markdown("---")
     st.markdown("### 🛡️ Account Safety Limits")
@@ -283,7 +291,10 @@ with st.sidebar:
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
                 supabase.table('portfolio').insert({"symbol": res['symbol'], "entry_price": res['price'], "qty": res['qty'], "date": str(datetime.date.today()), "owner": f_own}).execute()
-                st.success("Logged!"); del st.session_state['agent_result']; load_table.clear(); safe_rerun()
+                st.success("✅ Logged successfully!")
+                del st.session_state['agent_result']
+                time.sleep(0.8)
+                safe_rerun()
 
 # ===================== HEADER & ALERTS =====================
 st.markdown("<div style='text-align:center;'><h1 class='gradient-text' style='font-size: 3rem;'>Titan Quantum Pro V2.1</h1></div>", unsafe_allow_html=True)
@@ -378,7 +389,9 @@ with tabs[0]:
                             if total_risk > (acc_size * 0.03): st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
                             elif final_own:
                                 supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": final_own}).execute()
-                                st.success(f"Added to {final_own}'s ledger!"); load_table.clear(); safe_rerun()
+                                st.success(f"✅ Added to {final_own}'s ledger!")
+                                time.sleep(0.8)
+                                safe_rerun()
         else: st.info("🟡 No safe setups matching your strategy criteria. Cash is a position.")
     else: st.error("No data available.")
 
@@ -504,7 +517,9 @@ with tabs[1]:
                     if total_risk > (acc_size * 0.03): st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
                     elif f_own and a_sym:
                         supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
-                        st.success(f"Holding Added to {f_own}!"); load_table.clear(); safe_rerun()
+                        st.success(f"✅ Holding Added to {f_own}!")
+                        time.sleep(0.8)
+                        safe_rerun()
 
         elif action == "➖ Exit Holding":
             with st.form("exit_form"):
@@ -517,20 +532,20 @@ with tabs[1]:
                     s_qty = c1.number_input(f"Qty (Max: {holding['qty'] if holding is not None else 0})", min_value=1, step=1)
                     s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
                     s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
-                    
                     s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
                         if s_qty <= holding['qty']:
                             
                             # THE FIX: Bulletproof ID Extractor. 
-                            # Prevents NameError (by defining the variable) and ValueError (by handling UUIDs/Floats correctly)
-                            raw_id = holding['id']
+                            raw_id = holding.get('id')
                             try:
-                                holding_id = str(int(raw_id)) if float(raw_id).is_integer() else str(raw_id)
-                            except ValueError:
+                                # Convert float representations like 14.0 back to standard integer form
+                                holding_id = int(float(raw_id)) if str(raw_id).replace('.','',1).isdigit() else str(raw_id)
+                            except (ValueError, TypeError):
+                                # If it's a UUID string, keep it as a string
                                 holding_id = str(raw_id)
-                            
+                                
                             if "Delete" not in s_rsn:
                                 full_reason = f"{s_rsn} | Setup: {s_tag}"
                                 supabase.table('trade_history').insert({
@@ -544,12 +559,12 @@ with tabs[1]:
                             if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
                             else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
                             
-                            st.success("Sale Executed & Journaled!")
-                            load_table.clear()
+                            st.success("✅ Sale Executed & Journaled!")
+                            time.sleep(0.8)
                             safe_rerun()
                         else: st.error("Cannot sell more than held.")
                 else: st.info("No stocks to sell.")
-                    
+
 with tabs[2]:
     st.subheader("📋 Advanced Screener")
     with st.expander("📚 Knowledge Bytes: How to Screen"):

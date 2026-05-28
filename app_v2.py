@@ -14,13 +14,18 @@ import pandas_ta_classic as ta
 
 if not hasattr(pd.Series, "append"): pd.Series.append = pd.Series._append
 
+# THE FIX: Bulletproof rerun that clears cache and DOES NOT swallow exceptions
 def safe_rerun():
     try:
         load_table.clear()
         load_market_data.clear()
-    except Exception: pass
-    if hasattr(st, "rerun"): st.rerun()
-    elif hasattr(st, "experimental_rerun"): st.experimental_rerun()
+    except Exception:
+        pass
+    
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
 
 IST = pytz.timezone('Asia/Kolkata')
 def get_ist_now(): return datetime.datetime.now(IST)
@@ -31,14 +36,26 @@ st.set_page_config(page_title="Titan Quantum Pro V2.1", layout="wide", page_icon
 st.markdown("""
 <style>
     .main { background-color: #0B0E14; color: #E0E6ED; font-family: 'Inter', sans-serif; }
-    .stButton>button { background: linear-gradient(135deg, #00B8FF 0%, #0073FF 100%); color: white; font-weight: 600; border-radius: 8px; border: none; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 184, 255, 0.2); }
+    .stButton>button { 
+        background: linear-gradient(135deg, #00B8FF 0%, #0073FF 100%);
+        color: white; font-weight: 600; border-radius: 8px; border: none;
+        transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 184, 255, 0.2);
+    }
     .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 184, 255, 0.4); }
-    div[data-testid="metric-container"] { background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    div[data-testid="metric-container"] {
+        background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
     .streamlit-expanderHeader { background-color: #141824; border-radius: 8px; }
     .stDataFrame { border-radius: 10px; overflow: hidden; }
-    .gradient-text { background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; margin-bottom: 0; }
+    .gradient-text {
+        background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        font-weight: 800; margin-bottom: 0;
+    }
     @media (max-width: 768px) {
-        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; padding-bottom: 10px; }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) {
+            flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; padding-bottom: 10px;
+        }
         [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) > [data-testid="column"] { min-width: 180px !important; }
         [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
     }
@@ -86,6 +103,17 @@ def load_market_data():
 def load_table(table_name):
     try: return pd.DataFrame(supabase.table(table_name).select("*").execute().data)
     except: return pd.DataFrame()
+
+# ===================== KNOWLEDGE BASE =====================
+KNOWLEDGE = {
+    "score": "#### 📊 Confluence Score (0-100)\nCombines technical factors. **Trend (Max +30):** Price > 20 EMA > 50 EMA. **Momentum (Max +15):** RSI between 55-75. **Volume (Max +10):** RVOL > 1.5x. **RS (Max +15):** Outperforming NIFTY 50.\n*Veto Penalty:* Weekly Trend breakdown removes 30 pts.",
+    "probability": "#### 🎯 Win Probability %\nBayesian probability calculated from historical base rates calibrated with your personal win rate. 75% means historically 3 out of 4 setups with this score hit their target.",
+    "damage": "#### 💀 Damage Score (0-100)\nMeasures deterioration: **0-30:** Normal pullback. **31-55:** TIGHTEN STOP. **56-80:** SCALE OUT 50%. **81-100:** EXIT IMMEDIATE.",
+    "rvol": "#### 📈 RVOL & Turnover\n**RVOL:** Current volume / 20-day average. **Turnover:** Daily traded value in Crores. Avoid stocks under 5 Cr.",
+    "rr": "#### ⚖️ Risk:Reward Ratio\nPotential reward / risk. 1:2 means risking Rs.1 to make Rs.2. Target minimum 1:1.5.",
+    "pattern": "#### 🕯️ Volume Profile S&R\nV2.1 calculates resistance based on the Point of Control (where max volume traded), not just random wicks.",
+    "regime": "#### 🌍 Market Regime\n**Strong Bull:** Nifty > 20 EMA. **Caution:** Below 20 EMA but > 50 EMA. **Bearish:** Below 50 EMA. Cash is a position."
+}
 
 # ===================== HELPERS & CHARTING =====================
 def get_index_data(ticker_symbol):
@@ -226,6 +254,7 @@ if not port_df.empty:
 
         dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
         
+        # SL OVERRIDE LOGIC
         if cmp <= stop:
             verdict = "🔴 EXIT IMMEDIATE (SL HIT)"
             critical_alerts.append(f"🚨 {sym} HIT STOP LOSS! (CMP: ₹{cmp:.2f} vs SL: ₹{stop:.2f})")
@@ -264,8 +293,10 @@ with st.sidebar:
     if 'agent_result' in st.session_state and st.session_state['agent_result'].get('action') == 'BUY':
         res = st.session_state['agent_result']
         st.success(f"Detected: BUY {res['qty']} {res['symbol']} @ ₹{res['price']}")
+        
         a_own = st.selectbox("Assign Owner", db_owners + ["+ Add New Portfolio"])
         f_own = st.text_input("New Name:") if a_own == "+ Add New Portfolio" else a_own
+            
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
                 supabase.table('portfolio').insert({"symbol": res['symbol'], "entry_price": res['price'], "qty": res['qty'], "date": str(datetime.date.today()), "owner": f_own}).execute()
@@ -552,7 +583,6 @@ with tabs[1]:
             fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sec, use_container_width=True)
 
-        # PRO-TRADER FIX: Tabbed Interface for Mobile Responsive Detail Cards
         st.markdown("##### 📊 Active Holdings")
         def color_pnl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B' if val < 0 else 'white'}; font-weight: bold;"
         
@@ -601,6 +631,7 @@ with tabs[1]:
                 </div>
                 """, unsafe_allow_html=True)
                 render_interactive_chart(selected_stock, f"portfolio_{selected_stock}")
+
     else: st.info(f"No active holdings for {view_owner}.")
 
 with tabs[2]:
@@ -694,7 +725,6 @@ with tabs[5]:
 
         # PRO-TRADER FIX: Automated Performance Journal by Setup Category
         st.markdown("##### 📓 Setup Performance Journal")
-        # Extract the tag cleanly from the "Reason | Setup: Tag" text we pushed to the DB
         h_data['setup_tag'] = h_data['exit_reason'].apply(lambda x: str(x).split("Setup: ")[1] if "Setup:" in str(x) else "Untagged")
         
         journal = h_data.groupby('setup_tag').agg(
@@ -708,6 +738,7 @@ with tabs[5]:
         st.markdown("---")
 
         def style_pl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B'}; font-weight: bold;"
+        
         st.dataframe(h_data[['symbol', 'buy_price', 'sell_price', 'pl_percentage', 'realized_pl', 'exit_reason', 'sell_date']].sort_values('sell_date', ascending=False).style.format({"sell_price": "Rs.{:.2f}", "buy_price": "Rs.{:.2f}", "realized_pl": "Rs.{:.2f}", "pl_percentage": "{:.1f}%"}).map(style_pl, subset=['realized_pl', 'pl_percentage']), use_container_width=True, hide_index=True)
     else: st.info("No trade history logged.")
 

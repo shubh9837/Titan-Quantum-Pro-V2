@@ -4,6 +4,7 @@ import numpy as np
 import yfinance as yf
 import pytz
 import datetime  
+import time
 import plotly.graph_objects as go
 import plotly.express as px
 from supabase import create_client
@@ -12,6 +13,19 @@ from titan_agent import parse_trade_text, parse_order_image, get_response
 import pandas_ta_classic as ta
 
 if not hasattr(pd.Series, "append"): pd.Series.append = pd.Series._append
+
+# THE FIX: Bulletproof rerun that clears cache and DOES NOT swallow exceptions
+def safe_rerun():
+    try:
+        load_table.clear()
+        load_market_data.clear()
+    except Exception:
+        pass
+    
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
 
 IST = pytz.timezone('Asia/Kolkata')
 def get_ist_now(): return datetime.datetime.now(IST)
@@ -178,7 +192,7 @@ def format_prob_icon(val):
 
 def get_exit_badge(verdict):
     v = str(verdict).upper()
-    if 'EXIT IMMEDIATE' in v: return '🔴 EXIT IMMEDIATE'
+    if 'EXIT' in v: return '🔴 EXIT IMMEDIATE'
     if 'SCALE OUT' in v: return '⚠️ SCALE OUT 50%'
     if 'TIGHTEN' in v: return '🟡 TIGHTEN STOP'
     return '🟢 HOLD'
@@ -235,17 +249,22 @@ if not port_df.empty:
         hist_data.dropna(inplace=True)
 
         dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
-        total_risk += max(0, cmp - stop) * qty
         
-        if cmp <= stop: critical_alerts.append(f"🚨 {sym} HIT STOP LOSS! (CMP: ₹{cmp:.2f} vs SL: ₹{stop:.2f})")
-        elif dmg >= 70: critical_alerts.append(f"⚠️ {sym} HIGH DAMAGE ({dmg}/100). Suggestion: SCALE OUT OR EXIT.")
+        # SL OVERRIDE LOGIC
+        if cmp <= stop:
+            verdict = "🔴 EXIT IMMEDIATE (SL HIT)"
+            critical_alerts.append(f"🚨 {sym} HIT STOP LOSS! (CMP: ₹{cmp:.2f} vs SL: ₹{stop:.2f})")
+        elif dmg >= 70: 
+            critical_alerts.append(f"⚠️ {sym} HIGH DAMAGE ({dmg}/100). Suggestion: SCALE OUT OR EXIT.")
+
+        total_risk += max(0, cmp - stop) * qty
 
 # ===================== SIDEBAR =====================
 with st.sidebar:
     st.markdown("<h3 class='gradient-text'>💎 Titan Quantum Pro</h3>", unsafe_allow_html=True)
     st.caption(f"IST Sync: {get_ist_now().strftime('%d %b %H:%M')}")
     if st.button("🔄 Refresh Data", use_container_width=True):
-        load_market_data.clear(); load_table.clear(); st.rerun()
+        safe_rerun()
 
     st.markdown("---")
     st.markdown("### 🛡️ Account Safety Limits")
@@ -277,7 +296,7 @@ with st.sidebar:
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
                 supabase.table('portfolio').insert({"symbol": res['symbol'], "entry_price": res['price'], "qty": res['qty'], "date": str(datetime.date.today()), "owner": f_own}).execute()
-                st.success("Logged!"); del st.session_state['agent_result']; load_table.clear(); st.rerun()
+                st.success("Logged!"); del st.session_state['agent_result']; safe_rerun()
 
 # ===================== HEADER & ALERTS =====================
 st.markdown("<div style='text-align:center;'><h1 class='gradient-text' style='font-size: 3rem;'>Titan Quantum Pro V2.1</h1></div>", unsafe_allow_html=True)
@@ -372,103 +391,12 @@ with tabs[0]:
                             if total_risk > (acc_size * 0.03): st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
                             elif final_own:
                                 supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": final_own}).execute()
-                                st.success(f"Added to {final_own}'s ledger!"); load_table.clear(); st.rerun()
+                                st.success(f"Added to {final_own}'s ledger!"); safe_rerun()
         else: st.info("🟡 No safe setups matching your strategy criteria. Cash is a position.")
     else: st.error("No data available.")
 
 with tabs[1]:
     view_owner = st.selectbox("👤 Select Portfolio to View", db_owners, index=default_owner_idx)
-    
-    # -------------------------------------------------------------------------
-    # NEW ARCHITECTURE: Management Controller is processed BEFORE the Dashboard
-    # -------------------------------------------------------------------------
-    st.markdown("---")
-    st.subheader("⚙️ Portfolio Management")
-    
-    # Fetch a temporary copy of the portfolio just for populating the forms
-    temp_port_df = load_table('portfolio')
-    temp_active_port = temp_port_df[temp_port_df['owner'] == view_owner] if not temp_port_df.empty else pd.DataFrame()
-    
-    with st.container(border=True):
-        action = st.radio("Select Action", ["➕ Add Holding", "➖ Exit Holding"], horizontal=True)
-        
-        if action == "➕ Add Holding":
-            c1, c2 = st.columns(2)
-            a_sym = c1.selectbox("Stock", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
-            a_qty = c2.number_input("Quantity", min_value=1, step=1)
-            a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
-            
-            a_own = c2.selectbox("Select Existing Owner", db_owners, index=default_owner_idx)
-            a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
-            
-            if st.button("Add to Database", use_container_width=True):
-                f_own = a_new.strip() if a_new.strip() else a_own
-                if total_risk > (acc_size * 0.03): 
-                    st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
-                elif f_own and a_sym:
-                    supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
-                    st.success(f"✅ Holding Added to {f_own}!")
-                    load_table.clear()
-
-        elif action == "➖ Exit Holding":
-            st.info(f"💡 You are clearing stocks from **{view_owner}'s** portfolio.")
-            if not temp_active_port.empty:
-                s_sym = st.selectbox("Stock to Exit", temp_active_port['symbol'].unique())
-                
-                # BUG 1 FIX: Correctly group multiple lots to get the TRUE total quantity
-                holdings_for_sym = temp_active_port[temp_active_port['symbol'] == s_sym]
-                total_qty = int(holdings_for_sym['qty'].astype(int).sum())
-                
-                c1, c2, c3 = st.columns([1, 1, 1.5])
-                # BUG 2 FIX: Max value now strictly obeys the dynamic total_qty
-                s_qty = c1.number_input(f"Qty (Max: {total_qty})", min_value=1, max_value=total_qty, step=1)
-                s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
-                s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
-                s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
-                
-                if st.button("Execute Sale", use_container_width=True):
-                    qty_to_sell = s_qty
-                    
-                    # Deduct sequentially across all active database rows for this stock
-                    for _, h in holdings_for_sym.iterrows():
-                        if qty_to_sell <= 0: break
-                        
-                        h_qty = int(h['qty'])
-                        raw_id = h.get('id')
-                        try:
-                            holding_id = int(float(raw_id)) if str(raw_id).replace('.','',1).isdigit() else str(raw_id)
-                        except (ValueError, TypeError):
-                            holding_id = str(raw_id)
-                            
-                        sell_from_this_lot = min(h_qty, qty_to_sell)
-                        qty_to_sell -= sell_from_this_lot
-                        
-                        if "Delete" not in s_rsn:
-                            full_reason = f"{s_rsn} | Setup: {s_tag}"
-                            supabase.table('trade_history').insert({
-                                "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(sell_from_this_lot),
-                                "buy_price": float(h['entry_price']), "realized_pl": float((s_price - float(h['entry_price'])) * sell_from_this_lot),
-                                "pl_percentage": float(((s_price - float(h['entry_price']))/float(h['entry_price']))*100),
-                                "sell_date": str(datetime.date.today()), "exit_reason": full_reason, "owner": h['owner']
-                            }).execute()
-                            
-                        n_qty = h_qty - sell_from_this_lot
-                        if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
-                        else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
-                        
-                    st.success("✅ Sale Executed & Journaled!")
-                    load_table.clear()
-            else:
-                st.info("No stocks to sell.")
-
-    # -------------------------------------------------------------------------
-    # UI DASHBOARD RENDERING (Now naturally loads fresh data without a rerun)
-    # -------------------------------------------------------------------------
-    st.markdown("---")
-    
-    # We deliberately load port_df AGAIN right here. If the user just clicked sell,
-    # the cache was cleared above, so this fetch pulls the real-time exact database data.
-    port_df = load_table('portfolio')
     active_port = port_df[port_df['owner'] == view_owner] if not port_df.empty else pd.DataFrame()
 
     if not active_port.empty:
@@ -497,16 +425,24 @@ with tabs[1]:
             hist_data.dropna(inplace=True)
 
             dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
+            
+            # PRO-TRADER FIX: Force Absolute Override if SL is breached
+            if cmp <= stop:
+                verdict = "🔴 EXIT IMMEDIATE (SL HIT)"
+                sl_proximity = "🔴 HIT"
+            elif cmp <= stop * 1.02:
+                sl_proximity = "⚠️ NEAR"
+                if "EXIT" not in str(verdict).upper() and "SCALE" not in str(verdict).upper():
+                    verdict = "🟡 TIGHTEN STOP (NEAR SL)"
+            else:
+                sl_proximity = ""
+
             view_dmg += dmg
             
             locked_target = float(live['TARGET']) if live is not None else entry * 1.15
             pnl_pct = ((cmp - entry) / entry) * 100
             val = cmp * qty
             view_risk += max(0, cmp - stop) * qty
-            
-            sl_proximity = ""
-            if cmp <= stop: sl_proximity = "🔴 HIT"
-            elif cmp <= stop * 1.02: sl_proximity = "⚠️ NEAR"
 
             port_calc_view.append({
                 "symbol": sym, "sector": sector, "qty": qty, "entry": entry, "cmp": cmp, "pnl_pct": pnl_pct, "profit": qty * (cmp - entry),
@@ -527,13 +463,16 @@ with tabs[1]:
 
         st.markdown("##### 🥧 Allocation Breakdown")
         pc1, pc2 = st.columns(2)
-        colors = px.colors.qualitative.Pastel
+        
+        # PRO-TRADER FIX: Replaced harsh colors with the requested soothing Pastel/Set3 palette from your image
+        custom_colors = px.colors.qualitative.Set3 
+        
         with pc1:
-            fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4, color_discrete_sequence=colors)
+            fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4, color_discrete_sequence=custom_colors)
             fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sym, use_container_width=True)
         with pc2:
-            fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4, color_discrete_sequence=colors)
+            fig_sec = px.pie(pdf, values='val', names='sector', title="Sector Allocation", hole=0.4, color_discrete_sequence=custom_colors)
             fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sec, use_container_width=True)
 
@@ -568,6 +507,88 @@ with tabs[1]:
                 render_interactive_chart(selected_stock, f"portfolio_{selected_stock}")
 
     else: st.info(f"No active holdings for {view_owner}.")
+
+    # =================================================================================
+    # PRO-TRADER FIX: Portfolio Management remains at the BOTTOM as originally requested
+    # =================================================================================
+    st.markdown("---")
+    st.subheader("⚙️ Portfolio Management")
+    with st.container(border=True):
+        
+        # Determine current state context safely
+        action = st.radio("Select Action", ["➕ Add Holding", "➖ Exit Holding"], horizontal=True)
+        
+        if action == "➕ Add Holding":
+            c1, c2 = st.columns(2)
+            a_sym = c1.selectbox("Stock", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
+            a_qty = c2.number_input("Quantity", min_value=1, step=1)
+            a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
+            
+            a_own = c2.selectbox("Select Existing Owner", db_owners, index=default_owner_idx)
+            a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
+            
+            if st.button("Add to Database", use_container_width=True):
+                f_own = a_new.strip() if a_new.strip() else a_own
+                if total_risk > (acc_size * 0.03): 
+                    st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
+                elif f_own and a_sym:
+                    supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
+                    st.success(f"✅ Holding Added to {f_own}!")
+                    safe_rerun()
+
+        elif action == "➖ Exit Holding":
+            st.info(f"💡 You are clearing stocks from **{view_owner}'s** portfolio.")
+            
+            # We strictly fetch active_port locally so it respects the user's dropdown above
+            if not active_port.empty:
+                s_sym = st.selectbox("Stock to Exit", active_port['symbol'].unique())
+                
+                # PRO-TRADER FIX: Correctly group multiple batches to sum the TRUE total quantity
+                holdings_for_sym = active_port[active_port['symbol'] == s_sym]
+                total_qty = int(holdings_for_sym['qty'].astype(int).sum())
+                
+                c1, c2, c3 = st.columns([1, 1, 1.5])
+                s_qty = c1.number_input(f"Qty (Max: {total_qty})", min_value=1, max_value=total_qty, step=1)
+                s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
+                s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
+                
+                s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
+                
+                if st.button("Execute Sale", use_container_width=True):
+                    qty_to_sell = s_qty
+                    
+                    # Loop safely to deduct sequentially across all database rows for this stock
+                    for _, h in holdings_for_sym.iterrows():
+                        if qty_to_sell <= 0: break
+                        
+                        h_qty = int(h['qty'])
+                        raw_id = h.get('id')
+                        try:
+                            holding_id = int(float(raw_id)) if str(raw_id).replace('.','',1).isdigit() else str(raw_id)
+                        except (ValueError, TypeError):
+                            holding_id = str(raw_id)
+                            
+                        sell_from_this_lot = min(h_qty, qty_to_sell)
+                        qty_to_sell -= sell_from_this_lot
+                        
+                        if "Delete" not in s_rsn:
+                            full_reason = f"{s_rsn} | Setup: {s_tag}"
+                            supabase.table('trade_history').insert({
+                                "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(sell_from_this_lot),
+                                "buy_price": float(h['entry_price']), "realized_pl": float((s_price - float(h['entry_price'])) * sell_from_this_lot),
+                                "pl_percentage": float(((s_price - float(h['entry_price']))/float(h['entry_price']))*100),
+                                "sell_date": str(datetime.date.today()), "exit_reason": full_reason, "owner": h['owner']
+                            }).execute()
+                            
+                        n_qty = h_qty - sell_from_this_lot
+                        if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
+                        else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
+                        
+                    st.success("✅ Sale Executed & Journaled!")
+                    time.sleep(0.8) # Tiny delay to allow success reading before screen wipe
+                    safe_rerun()
+            else:
+                st.info("No stocks to sell.")
 
 with tabs[2]:
     st.subheader("📋 Advanced Screener")

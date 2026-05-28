@@ -14,18 +14,13 @@ import pandas_ta_classic as ta
 
 if not hasattr(pd.Series, "append"): pd.Series.append = pd.Series._append
 
-# THE FIX: Bulletproof rerun that clears cache and DOES NOT swallow exceptions
 def safe_rerun():
     try:
         load_table.clear()
         load_market_data.clear()
-    except Exception:
-        pass
-    
-    if hasattr(st, "rerun"):
-        st.rerun()
-    elif hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
+    except Exception: pass
+    if hasattr(st, "rerun"): st.rerun()
+    elif hasattr(st, "experimental_rerun"): st.experimental_rerun()
 
 IST = pytz.timezone('Asia/Kolkata')
 def get_ist_now(): return datetime.datetime.now(IST)
@@ -36,30 +31,22 @@ st.set_page_config(page_title="Titan Quantum Pro V2.1", layout="wide", page_icon
 st.markdown("""
 <style>
     .main { background-color: #0B0E14; color: #E0E6ED; font-family: 'Inter', sans-serif; }
-    .stButton>button { 
-        background: linear-gradient(135deg, #00B8FF 0%, #0073FF 100%);
-        color: white; font-weight: 600; border-radius: 8px; border: none;
-        transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 184, 255, 0.2);
-    }
+    .stButton>button { background: linear-gradient(135deg, #00B8FF 0%, #0073FF 100%); color: white; font-weight: 600; border-radius: 8px; border: none; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 184, 255, 0.2); }
     .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 184, 255, 0.4); }
-    div[data-testid="metric-container"] {
-        background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    }
+    div[data-testid="metric-container"] { background-color: #141824; border: 1px solid #2A3143; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
     .streamlit-expanderHeader { background-color: #141824; border-radius: 8px; }
     .stDataFrame { border-radius: 10px; overflow: hidden; }
-    .gradient-text {
-        background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        font-weight: 800; margin-bottom: 0;
-    }
+    .gradient-text { background: -webkit-linear-gradient(45deg, #00B8FF, #00FF88); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; margin-bottom: 0; }
     @media (max-width: 768px) {
-        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) {
-            flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; padding-bottom: 10px;
-        }
+        [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; padding-bottom: 10px; }
         [data-testid="stHorizontalBlock"]:has([data-testid="stMetricValue"]) > [data-testid="column"] { min-width: 180px !important; }
         [data-testid="stMetricValue"] { font-size: 1.8rem !important; }
     }
-    .emergency-marquee { background-color: #FF4B4B; color: white; padding: 15px; border-radius: 10px; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(255, 75, 75, 0.4); }
+    .emergency-marquee { background-color: #FF4B4B; color: white; padding: 15px; border-radius: 10px; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(255, 75, 75, 0.4); text-align: center; }
+    .mobile-card { background:#141824; border:1px solid #2A3143; border-radius:10px; padding:15px; margin-bottom:10px; }
+    .mobile-card-title { font-size: 1.1rem; font-weight: bold; color: #E0E6ED; margin-bottom: 10px; }
+    .mobile-card-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9rem; }
+    .mobile-card-label { color: #A0ABBA; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,17 +86,6 @@ def load_market_data():
 def load_table(table_name):
     try: return pd.DataFrame(supabase.table(table_name).select("*").execute().data)
     except: return pd.DataFrame()
-
-# ===================== KNOWLEDGE BASE =====================
-KNOWLEDGE = {
-    "score": "#### 📊 Confluence Score (0-100)\nCombines technical factors. **Trend (Max +30):** Price > 20 EMA > 50 EMA. **Momentum (Max +15):** RSI between 55-75. **Volume (Max +10):** RVOL > 1.5x. **RS (Max +15):** Outperforming NIFTY 50.\n*Veto Penalty:* Weekly Trend breakdown removes 30 pts.",
-    "probability": "#### 🎯 Win Probability %\nBayesian probability calculated from historical base rates calibrated with your personal win rate. 75% means historically 3 out of 4 setups with this score hit their target.",
-    "damage": "#### 💀 Damage Score (0-100)\nMeasures deterioration: **0-30:** Normal pullback. **31-55:** TIGHTEN STOP. **56-80:** SCALE OUT 50%. **81-100:** EXIT IMMEDIATE.",
-    "rvol": "#### 📈 RVOL & Turnover\n**RVOL:** Current volume / 20-day average. **Turnover:** Daily traded value in Crores. Avoid stocks under 5 Cr.",
-    "rr": "#### ⚖️ Risk:Reward Ratio\nPotential reward / risk. 1:2 means risking Rs.1 to make Rs.2. Target minimum 1:1.5.",
-    "pattern": "#### 🕯️ Volume Profile S&R\nV2.1 calculates resistance based on the Point of Control (where max volume traded), not just random wicks.",
-    "regime": "#### 🌍 Market Regime\n**Strong Bull:** Nifty > 20 EMA. **Caution:** Below 20 EMA but > 50 EMA. **Bearish:** Below 50 EMA. Cash is a position."
-}
 
 # ===================== HELPERS & CHARTING =====================
 def get_index_data(ticker_symbol):
@@ -250,7 +226,6 @@ if not port_df.empty:
 
         dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
         
-        # SL OVERRIDE LOGIC
         if cmp <= stop:
             verdict = "🔴 EXIT IMMEDIATE (SL HIT)"
             critical_alerts.append(f"🚨 {sym} HIT STOP LOSS! (CMP: ₹{cmp:.2f} vs SL: ₹{stop:.2f})")
@@ -289,10 +264,8 @@ with st.sidebar:
     if 'agent_result' in st.session_state and st.session_state['agent_result'].get('action') == 'BUY':
         res = st.session_state['agent_result']
         st.success(f"Detected: BUY {res['qty']} {res['symbol']} @ ₹{res['price']}")
-        
         a_own = st.selectbox("Assign Owner", db_owners + ["+ Add New Portfolio"])
         f_own = st.text_input("New Name:") if a_own == "+ Add New Portfolio" else a_own
-            
         if st.button("✅ Confirm & Log", use_container_width=True):
             if f_own:
                 supabase.table('portfolio').insert({"symbol": res['symbol'], "entry_price": res['price'], "qty": res['qty'], "date": str(datetime.date.today()), "owner": f_own}).execute()
@@ -339,8 +312,17 @@ with tabs[0]:
         inst_df = df[df['TURNOVER_CR'] >= 5.0].copy() 
         actionable = inst_df[(inst_df['PROBABILITY'] >= 60) & (inst_df['SCORE'] >= 60) & (~inst_df['CLEAN_VERDICT'].str.contains('AVOID', na=False))].copy()
         
+        # PRO TRADER FIX: Capital Sizing tied to Market Regime
+        regime_multiplier = 1.0 if "BULLISH" in status else (0.5 if "SIDEWAYS" in status else 0.0)
+        base_trade_capital = 10000 * regime_multiplier
+
+        if base_trade_capital == 0:
+            st.error("🐻 MARKET IS BEARISH. Position sizing reduced to ₹0. Cash is a position.")
+        elif regime_multiplier == 0.5:
+            st.warning(f"⚖️ MARKET IS SIDEWAYS. Suggested position sizing reduced to 50% (₹{base_trade_capital:,.0f}).")
+        
         if not actionable.empty:
-            actionable['Est_Qty'] = (10000 / actionable['PRICE']).astype(int)
+            actionable['Est_Qty'] = (base_trade_capital / actionable['PRICE']).astype(int) if base_trade_capital > 0 else 0
             actionable = actionable.sort_values(['SCORE', 'PROBABILITY', 'UPSIDE_PCT'], ascending=[False, False, False]).head(10)
 
             c1, c2, c3, c4 = st.columns(4)
@@ -381,14 +363,20 @@ with tabs[0]:
                 with st.expander(f"📊 Chart & Action ({g['SYMBOL']})"):
                     render_interactive_chart(g['SYMBOL'], f"top_{idx}")
                     col1, col2 = st.columns([1, 2])
-                    with col1: st.info(f"💡 Suggestion: **{g['Est_Qty']}** shares (₹10k)")
+                    with col1: st.info(f"💡 Suggestion: **{g['Est_Qty']}** shares (₹{base_trade_capital:,.0f})")
                     with col2:
                         sel = st.selectbox("Select Existing Owner", db_owners, key=f"sel_{idx}", index=default_owner_idx)
                         f_own_input = st.text_input("OR Create New Owner:", key=f"fown_{idx}") 
                         final_own = f_own_input.strip() if f_own_input.strip() else sel
                         
                         if st.button(f"➕ Quick Add to Portfolio", key=f"add_{idx}"):
-                            if total_risk > (acc_size * 0.03): st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
+                            # PRO TRADER FIX: Sector Concentration Security Check during quick-add
+                            t_sec = df[df['SYMBOL'] == g['SYMBOL']]['SECTOR'].iloc[0] if g['SYMBOL'] in df['SYMBOL'].values else "Unknown"
+                            c_val = sum((float(df[df['SYMBOL'] == r['symbol']]['PRICE'].iloc[0]) if r['symbol'] in df['SYMBOL'].values else float(r['entry_price'])) * int(r['qty']) for _, r in port_df[port_df['owner'] == final_own].iterrows() if (df[df['SYMBOL'] == r['symbol']]['SECTOR'].iloc[0] if r['symbol'] in df['SYMBOL'].values else "Unknown") == t_sec)
+                            n_val = g['PRICE'] * g['Est_Qty']
+                            
+                            if total_risk > (acc_size * 0.03): st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Stop-loss risk exceeds 3% of account size.")
+                            elif (c_val + n_val) > (acc_size * 0.30): st.error(f"🛑 **SECTOR CAP REACHED.** Adding pushes '{t_sec}' over 30% of account. Diversify.")
                             elif final_own:
                                 supabase.table('portfolio').insert({"symbol": g['SYMBOL'], "entry_price": g['PRICE'], "qty": int(g['Est_Qty']), "date": str(datetime.date.today()), "owner": final_own}).execute()
                                 st.success(f"Added to {final_own}'s ledger!"); safe_rerun()
@@ -397,6 +385,100 @@ with tabs[0]:
 
 with tabs[1]:
     view_owner = st.selectbox("👤 Select Portfolio to View", db_owners, index=default_owner_idx)
+    
+    st.markdown("---")
+    st.subheader("⚙️ Portfolio Management")
+    temp_port_df = load_table('portfolio')
+    temp_active_port = temp_port_df[temp_port_df['owner'] == view_owner] if not temp_port_df.empty else pd.DataFrame()
+    
+    with st.container(border=True):
+        action = st.radio("Select Action", ["➕ Add Holding", "➖ Exit Holding"], horizontal=True)
+        
+        if action == "➕ Add Holding":
+            c1, c2 = st.columns(2)
+            a_sym = c1.selectbox("Stock", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
+            a_qty = c2.number_input("Quantity", min_value=1, step=1)
+            a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
+            
+            a_own = c2.selectbox("Select Existing Owner", db_owners, index=default_owner_idx)
+            a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
+            
+            if st.button("Add to Database", use_container_width=True):
+                f_own = a_new.strip() if a_new.strip() else a_own
+                
+                # PRO TRADER FIX: Sector Concentration Security Check
+                target_sector = df[df['SYMBOL'] == a_sym]['SECTOR'].iloc[0] if not df.empty and a_sym in df['SYMBOL'].values else "Unknown"
+                current_sector_val = 0
+                if not temp_active_port.empty:
+                    for _, ap_row in temp_active_port.iterrows():
+                        ap_sym = ap_row['symbol']
+                        ap_sec = df[df['SYMBOL'] == ap_sym]['SECTOR'].iloc[0] if ap_sym in df['SYMBOL'].values else "Unknown"
+                        if ap_sec == target_sector:
+                            ap_live_price = float(df[df['SYMBOL'] == ap_sym]['PRICE'].iloc[0]) if ap_sym in df['SYMBOL'].values else float(ap_row['entry_price'])
+                            current_sector_val += ap_live_price * int(ap_row['qty'])
+                
+                new_investment_val = a_price * a_qty
+                projected_sector_exposure = current_sector_val + new_investment_val
+                
+                if total_risk > (acc_size * 0.03): 
+                    st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
+                elif projected_sector_exposure > (acc_size * 0.30):
+                    st.error(f"🛑 **SECTOR CONCENTRATION LIMIT REACHED.** Adding this position pushes your '{target_sector}' exposure above 30% of total account capital. Diversify your risk.")
+                elif f_own and a_sym:
+                    supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
+                    st.success(f"✅ Holding Added to {f_own}!")
+                    load_table.clear()
+
+        elif action == "➖ Exit Holding":
+            st.info(f"💡 You are clearing stocks from **{view_owner}'s** portfolio.")
+            if not temp_active_port.empty:
+                s_sym = st.selectbox("Stock to Exit", temp_active_port['symbol'].unique())
+                
+                holdings_for_sym = temp_active_port[temp_active_port['symbol'] == s_sym]
+                total_qty = int(holdings_for_sym['qty'].astype(int).sum())
+                
+                c1, c2, c3 = st.columns([1, 1, 1.5])
+                s_qty = c1.number_input(f"Qty (Max: {total_qty})", min_value=1, max_value=total_qty, step=1)
+                s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
+                s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
+                s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
+                
+                if st.button("Execute Sale", use_container_width=True):
+                    qty_to_sell = s_qty
+                    for _, h in holdings_for_sym.iterrows():
+                        if qty_to_sell <= 0: break
+                        
+                        h_qty = int(h['qty'])
+                        raw_id = h.get('id')
+                        try:
+                            holding_id = int(float(raw_id)) if str(raw_id).replace('.','',1).isdigit() else str(raw_id)
+                        except (ValueError, TypeError):
+                            holding_id = str(raw_id)
+                            
+                        sell_from_this_lot = min(h_qty, qty_to_sell)
+                        qty_to_sell -= sell_from_this_lot
+                        
+                        if "Delete" not in s_rsn:
+                            full_reason = f"{s_rsn} | Setup: {s_tag}"
+                            supabase.table('trade_history').insert({
+                                "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(sell_from_this_lot),
+                                "buy_price": float(h['entry_price']), "realized_pl": float((s_price - float(h['entry_price'])) * sell_from_this_lot),
+                                "pl_percentage": float(((s_price - float(h['entry_price']))/float(h['entry_price']))*100),
+                                "sell_date": str(datetime.date.today()), "exit_reason": full_reason, "owner": h['owner']
+                            }).execute()
+                            
+                        n_qty = h_qty - sell_from_this_lot
+                        if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
+                        else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
+                        
+                    st.success("✅ Sale Executed & Journaled!")
+                    time.sleep(0.8)
+                    safe_rerun()
+            else:
+                st.info("No stocks to sell.")
+
+    st.markdown("---")
+    port_df = load_table('portfolio')
     active_port = port_df[port_df['owner'] == view_owner] if not port_df.empty else pd.DataFrame()
 
     if not active_port.empty:
@@ -426,7 +508,6 @@ with tabs[1]:
 
             dmg, verdict, stop, reason = engine.calculate_exit_damage(sym, entry, row.get('date', datetime.date.today()), hist_data, live)
             
-            # PRO-TRADER FIX: Force Absolute Override if SL is breached
             if cmp <= stop:
                 verdict = "🔴 EXIT IMMEDIATE (SL HIT)"
                 sl_proximity = "🔴 HIT"
@@ -434,11 +515,9 @@ with tabs[1]:
                 sl_proximity = "⚠️ NEAR"
                 if "EXIT" not in str(verdict).upper() and "SCALE" not in str(verdict).upper():
                     verdict = "🟡 TIGHTEN STOP (NEAR SL)"
-            else:
-                sl_proximity = ""
+            else: sl_proximity = ""
 
             view_dmg += dmg
-            
             locked_target = float(live['TARGET']) if live is not None else entry * 1.15
             pnl_pct = ((cmp - entry) / entry) * 100
             val = cmp * qty
@@ -463,10 +542,7 @@ with tabs[1]:
 
         st.markdown("##### 🥧 Allocation Breakdown")
         pc1, pc2 = st.columns(2)
-        
-        # PRO-TRADER FIX: Replaced harsh colors with the requested soothing Pastel/Set3 palette from your image
         custom_colors = px.colors.qualitative.Set3 
-        
         with pc1:
             fig_sym = px.pie(pdf, values='val', names='symbol', title="Holding Allocation", hole=0.4, color_discrete_sequence=custom_colors)
             fig_sym.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
@@ -476,13 +552,33 @@ with tabs[1]:
             fig_sec.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_sec, use_container_width=True)
 
+        # PRO-TRADER FIX: Tabbed Interface for Mobile Responsive Detail Cards
         st.markdown("##### 📊 Active Holdings")
         def color_pnl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B' if val < 0 else 'white'}; font-weight: bold;"
         
         display_pdf = pdf[['verdict', 'damage', 'symbol', 'qty', 'entry', 'cmp', 'pnl_pct', 'profit', 'locked_target', 'stop', 'proximity', 'days_held']].rename(
             columns={'verdict': 'Action', 'damage': 'Damage', 'symbol': 'Stock', 'qty': 'Qty', 'entry': 'Entry (₹)', 'cmp': 'CMP (₹)', 'pnl_pct': 'P&L (%)', 'profit': 'P&L (₹)', 'locked_target': 'Target (₹)', 'stop': 'Trail SL (₹)', 'proximity': 'SL Alert', 'days_held': 'Days Held'}
         )
-        st.dataframe(display_pdf.style.format({"Entry (₹)": "{:.2f}", "CMP (₹)": "{:.2f}", "P&L (%)": "{:.2f}%", "P&L (₹)": "{:.2f}", "Target (₹)": "{:.2f}", "Trail SL (₹)": "{:.2f}", "Damage": "{:.0f}"}).map(color_pnl, subset=['P&L (%)', 'P&L (₹)']), use_container_width=True, hide_index=True)
+        
+        tab_table, tab_cards = st.tabs(["📊 Table View (Desktop)", "📱 Mobile Card View"])
+        with tab_table:
+            st.dataframe(display_pdf.style.format({"Entry (₹)": "{:.2f}", "CMP (₹)": "{:.2f}", "P&L (%)": "{:.2f}%", "P&L (₹)": "{:.2f}", "Target (₹)": "{:.2f}", "Trail SL (₹)": "{:.2f}", "Damage": "{:.0f}"}).map(color_pnl, subset=['P&L (%)', 'P&L (₹)']), use_container_width=True, hide_index=True)
+        with tab_cards:
+            for _, r in display_pdf.iterrows():
+                pnl_color = "#00FF88" if r['P&L (%)'] > 0 else "#FF4B4B"
+                alert_badge = f"<span style='background:#FF4B4B;color:white;padding:2px 6px;border-radius:4px;'>{r['SL Alert']}</span>" if r['SL Alert'] else ""
+                st.markdown(f"""
+                <div class='mobile-card'>
+                    <div class='mobile-card-title'>{r['Stock']} &nbsp; {alert_badge}</div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Action:</span> <b>{r['Action']}</b></div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Damage Score:</span> {r['Damage']}/100</div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Quantity:</span> {r['Qty']}</div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Entry -> CMP:</span> ₹{r['Entry (₹)']:.2f} ➔ ₹{r['CMP (₹)']:.2f}</div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>P&L:</span> <span style='color:{pnl_color};font-weight:bold;'>{r['P&L (%)']:.2f}% (₹{r['P&L (₹)']:.2f})</span></div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Trail SL:</span> ₹{r['Trail SL (₹)']:.2f}</div>
+                    <div class='mobile-card-row'><span class='mobile-card-label'>Target:</span> ₹{r['Target (₹)']:.2f}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
         st.markdown("---")
         st.subheader("🔍 Detailed Chart View")
@@ -505,90 +601,7 @@ with tabs[1]:
                 </div>
                 """, unsafe_allow_html=True)
                 render_interactive_chart(selected_stock, f"portfolio_{selected_stock}")
-
     else: st.info(f"No active holdings for {view_owner}.")
-
-    # =================================================================================
-    # PRO-TRADER FIX: Portfolio Management remains at the BOTTOM as originally requested
-    # =================================================================================
-    st.markdown("---")
-    st.subheader("⚙️ Portfolio Management")
-    with st.container(border=True):
-        
-        # Determine current state context safely
-        action = st.radio("Select Action", ["➕ Add Holding", "➖ Exit Holding"], horizontal=True)
-        
-        if action == "➕ Add Holding":
-            c1, c2 = st.columns(2)
-            a_sym = c1.selectbox("Stock", sorted(df['SYMBOL'].dropna().unique()) if not df.empty else [])
-            a_qty = c2.number_input("Quantity", min_value=1, step=1)
-            a_price = c1.number_input("Buy Price (Rs.)", min_value=0.0, format="%.2f")
-            
-            a_own = c2.selectbox("Select Existing Owner", db_owners, index=default_owner_idx)
-            a_new = st.text_input("OR Create New Owner (Overrides dropdown):")
-            
-            if st.button("Add to Database", use_container_width=True):
-                f_own = a_new.strip() if a_new.strip() else a_own
-                if total_risk > (acc_size * 0.03): 
-                    st.error("🚨 **PORTFOLIO STRESS LIMIT REACHED.** Your total portfolio stop-loss risk currently exceeds 3% of your account size. Do not add new positions.")
-                elif f_own and a_sym:
-                    supabase.table('portfolio').insert({"symbol": a_sym, "entry_price": a_price, "qty": a_qty, "date": str(datetime.date.today()), "owner": f_own}).execute()
-                    st.success(f"✅ Holding Added to {f_own}!")
-                    safe_rerun()
-
-        elif action == "➖ Exit Holding":
-            st.info(f"💡 You are clearing stocks from **{view_owner}'s** portfolio.")
-            
-            # We strictly fetch active_port locally so it respects the user's dropdown above
-            if not active_port.empty:
-                s_sym = st.selectbox("Stock to Exit", active_port['symbol'].unique())
-                
-                # PRO-TRADER FIX: Correctly group multiple batches to sum the TRUE total quantity
-                holdings_for_sym = active_port[active_port['symbol'] == s_sym]
-                total_qty = int(holdings_for_sym['qty'].astype(int).sum())
-                
-                c1, c2, c3 = st.columns([1, 1, 1.5])
-                s_qty = c1.number_input(f"Qty (Max: {total_qty})", min_value=1, max_value=total_qty, step=1)
-                s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
-                s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
-                
-                s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
-                
-                if st.button("Execute Sale", use_container_width=True):
-                    qty_to_sell = s_qty
-                    
-                    # Loop safely to deduct sequentially across all database rows for this stock
-                    for _, h in holdings_for_sym.iterrows():
-                        if qty_to_sell <= 0: break
-                        
-                        h_qty = int(h['qty'])
-                        raw_id = h.get('id')
-                        try:
-                            holding_id = int(float(raw_id)) if str(raw_id).replace('.','',1).isdigit() else str(raw_id)
-                        except (ValueError, TypeError):
-                            holding_id = str(raw_id)
-                            
-                        sell_from_this_lot = min(h_qty, qty_to_sell)
-                        qty_to_sell -= sell_from_this_lot
-                        
-                        if "Delete" not in s_rsn:
-                            full_reason = f"{s_rsn} | Setup: {s_tag}"
-                            supabase.table('trade_history').insert({
-                                "symbol": s_sym, "sell_price": float(s_price), "qty_sold": int(sell_from_this_lot),
-                                "buy_price": float(h['entry_price']), "realized_pl": float((s_price - float(h['entry_price'])) * sell_from_this_lot),
-                                "pl_percentage": float(((s_price - float(h['entry_price']))/float(h['entry_price']))*100),
-                                "sell_date": str(datetime.date.today()), "exit_reason": full_reason, "owner": h['owner']
-                            }).execute()
-                            
-                        n_qty = h_qty - sell_from_this_lot
-                        if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
-                        else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
-                        
-                    st.success("✅ Sale Executed & Journaled!")
-                    time.sleep(0.8) # Tiny delay to allow success reading before screen wipe
-                    safe_rerun()
-            else:
-                st.info("No stocks to sell.")
 
 with tabs[2]:
     st.subheader("📋 Advanced Screener")
@@ -679,8 +692,22 @@ with tabs[5]:
         c2.metric("🏆 Win Rate", f"{(len(h_data[h_data['realized_pl'] > 0]) / len(h_data) * 100):.1f}%")
         c3.metric("🎯 Best Trade", f"{h_data.loc[h_data['realized_pl'].idxmax()]['symbol']} (Rs.{h_data['realized_pl'].max():.0f})")
 
-        def style_pl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B'}; font-weight: bold;"
+        # PRO-TRADER FIX: Automated Performance Journal by Setup Category
+        st.markdown("##### 📓 Setup Performance Journal")
+        # Extract the tag cleanly from the "Reason | Setup: Tag" text we pushed to the DB
+        h_data['setup_tag'] = h_data['exit_reason'].apply(lambda x: str(x).split("Setup: ")[1] if "Setup:" in str(x) else "Untagged")
         
+        journal = h_data.groupby('setup_tag').agg(
+            Trades=('symbol', 'count'),
+            Win_Rate=('realized_pl', lambda x: f"{(sum(x > 0) / len(x) * 100):.1f}%"),
+            Total_PnL=('realized_pl', 'sum'),
+            Avg_Return=('pl_percentage', 'mean')
+        ).reset_index().rename(columns={'setup_tag': 'Setup Category', 'Total_PnL': 'Total P&L (₹)', 'Avg_Return': 'Avg ROI (%)'})
+        
+        st.dataframe(journal.style.format({'Total P&L (₹)': 'Rs.{:.2f}', 'Avg ROI (%)': '{:.2f}%'}).map(lambda val: f"color: {'#00FF88' if val > 0 else '#FF4B4B'}; font-weight: bold;", subset=['Total P&L (₹)', 'Avg ROI (%)']), use_container_width=True, hide_index=True)
+        st.markdown("---")
+
+        def style_pl(val): return f"color: {'#00FF88' if val > 0 else '#FF4B4B'}; font-weight: bold;"
         st.dataframe(h_data[['symbol', 'buy_price', 'sell_price', 'pl_percentage', 'realized_pl', 'exit_reason', 'sell_date']].sort_values('sell_date', ascending=False).style.format({"sell_price": "Rs.{:.2f}", "buy_price": "Rs.{:.2f}", "realized_pl": "Rs.{:.2f}", "pl_percentage": "{:.1f}%"}).map(style_pl, subset=['realized_pl', 'pl_percentage']), use_container_width=True, hide_index=True)
     else: st.info("No trade history logged.")
 

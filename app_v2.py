@@ -517,13 +517,19 @@ with tabs[1]:
                     s_qty = c1.number_input(f"Qty (Max: {holding['qty'] if holding is not None else 0})", min_value=1, step=1)
                     s_price = c2.number_input("Exit Price (Rs.)", min_value=0.0, format="%.2f")
                     s_rsn = c3.selectbox("Reason", ["Target Hit 🎯", "Stop Loss Hit 🛑", "Manual Exit ✋", "Data Error/Delete 🗑️"])
+                    
                     s_tag = st.selectbox("Setup Category (For Journaling)", ["Trend Continuation", "VCP Breakout", "Mean Reversion", "News/Earnings Event", "Mistake / FOMO", "Other"])
                     
                     if st.form_submit_button("Execute Sale") and holding is not None:
                         if s_qty <= holding['qty']:
-                            n_qty = int(holding['qty']) - int(s_qty)
-                            if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
-                            else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
+                            
+                            # THE FIX: Bulletproof ID Extractor. 
+                            # Prevents NameError (by defining the variable) and ValueError (by handling UUIDs/Floats correctly)
+                            raw_id = holding['id']
+                            try:
+                                holding_id = str(int(raw_id)) if float(raw_id).is_integer() else str(raw_id)
+                            except ValueError:
+                                holding_id = str(raw_id)
                             
                             if "Delete" not in s_rsn:
                                 full_reason = f"{s_rsn} | Setup: {s_tag}"
@@ -538,10 +544,12 @@ with tabs[1]:
                             if n_qty <= 0: supabase.table('portfolio').delete().eq('id', holding_id).execute()
                             else: supabase.table('portfolio').update({"qty": n_qty}).eq('id', holding_id).execute()
                             
-                            st.success("Sale Executed & Journaled!"); load_table.clear(); safe_rerun()
+                            st.success("Sale Executed & Journaled!")
+                            load_table.clear()
+                            safe_rerun()
                         else: st.error("Cannot sell more than held.")
                 else: st.info("No stocks to sell.")
-
+                    
 with tabs[2]:
     st.subheader("📋 Advanced Screener")
     with st.expander("📚 Knowledge Bytes: How to Screen"):

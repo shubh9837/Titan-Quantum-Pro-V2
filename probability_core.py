@@ -64,6 +64,17 @@ class ProbabilityEngine:
         ema50 = daily_df['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
         rsi = daily_df['RSI_14'].iloc[-1] if 'RSI_14' in daily_df else 50
         
+        verdict_override = None
+        weekly_trend = "Neutral"
+
+        # 🚨 PRO-TRADER FIX: NON-LINEAR HARD GATE
+        # If price is below daily 50 EMA, it is structurally broken. Zero the score instantly.
+        if cmp < ema50:
+            score = 0
+            verdict_override = "🔴 AVOID (Below 50 EMA)"
+            return 0, "Bearish", verdict_override
+
+        # Linear addition continues only if the structural gate is passed
         if cmp > ema20: score += 15
         if ema20 > ema50: score += 15
         if 55 <= rsi <= 75: score += 15 
@@ -72,17 +83,14 @@ class ProbabilityEngine:
         rvol = daily_df['Volume'].iloc[-1] / volume_ma if volume_ma > 0 else 1
         if rvol > 1.5: score += 10
         if rs_status == "Outperforming": score += 15
-
-        verdict_override = None
-        weekly_trend = "Neutral"
         
-        # Hard Veto Logic
+        # Hard Weekly Veto Logic
         if not weekly_df.empty:
             w_cmp = weekly_df['Close'].iloc[-1]
             w_ema50 = weekly_df['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
             if w_cmp < w_ema50:
                 weekly_trend = "Bearish"
-                score -= 40  # Hard structural penalty
+                score = 0  # Hard structural penalty
                 verdict_override = "🔴 AVOID (Weekly Bearish)"
             else:
                 weekly_trend = "Bullish"
